@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.1](https://github.com/metaneutrons/eule-mcp/compare/v0.8.0...v0.8.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* **imap:** file sent mail in the Sent folder ([8766c24](https://github.com/metaneutrons/eule-mcp/commit/8766c2416777b6c465c8da76220d501a583629d7))
+* **mail:** resolve folder names for Exchange searches ([8766c24](https://github.com/metaneutrons/eule-mcp/commit/8766c2416777b6c465c8da76220d501a583629d7))
+
 ## [0.8.0](https://github.com/metaneutrons/eule-mcp/compare/v0.7.1...v0.8.0) (2026-10-11)
 
 
