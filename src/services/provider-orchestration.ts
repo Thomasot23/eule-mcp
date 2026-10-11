@@ -65,3 +65,25 @@ export function selectConnector<C extends { readonly account: string }>(
       )
     : connectors.find(predicate);
 }
+
+/**
+ * Resolves the connector a write goes to. Writes never fall back to the first
+ * configured account: a message sent, or an event created, from the wrong
+ * account cannot be taken back, so the caller has to name the target. The
+ * error lists the accounts that would have been accepted.
+ */
+export function requireConnector<C extends { readonly account: string }>(
+  connectors: readonly C[],
+  account: string | undefined,
+  kind: string,
+  predicate: (connector: C) => boolean = () => true,
+): C {
+  const eligible = connectors.filter(predicate);
+  const available = eligible.length
+    ? `Available: ${eligible.map((connector) => connector.account).join(", ")}.`
+    : `No ${kind} account is available for this role.`;
+  if (!account?.trim()) throw new Error(`account is required for ${kind} writes. ${available}`);
+  const connector = selectConnector(eligible, account);
+  if (!connector) throw new Error(`No ${kind} connector for account "${account}". ${available}`);
+  return connector;
+}

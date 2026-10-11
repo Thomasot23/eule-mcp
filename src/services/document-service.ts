@@ -26,6 +26,19 @@ export class DocumentService {
     return [first, ...rest];
   }
 
+  /**
+   * Document tools address Paperless by role, not by account. A write may not
+   * pick the first of several instances, so it needs a role that leaves one.
+   */
+  private writeConnector(role?: string): DocumentConnector {
+    const connectors = this.connectors(role, "write");
+    if (connectors.length > 1)
+      throw new Error(
+        `Several document connectors are writable (${connectors.map((c) => c.account).join(", ")}). Pass a role that selects exactly one.`,
+      );
+    return connectors[0];
+  }
+
   async search(query: string, role?: string, limit = 20) {
     return collectProviderResults(this.connectors(role), (c) => c.searchDocuments(query, limit));
   }
@@ -73,7 +86,7 @@ export class DocumentService {
   ) {
     const safe = secureReadPath(path);
     if (!existsSync(safe)) throw new Error(`File not found: ${path}`);
-    const c = this.connectors(role, "write")[0];
+    const c = this.writeConnector(role);
     return c.uploadDocument(readFileSync(safe), basename(safe), metadata);
   }
   async update(
@@ -86,7 +99,7 @@ export class DocumentService {
       tags?: number[];
     },
   ) {
-    const c = this.connectors(role, "write")[0];
+    const c = this.writeConnector(role);
     return c.updateDocument(id, patch);
   }
   async bulk(
@@ -95,7 +108,7 @@ export class DocumentService {
     role?: string,
     options: { tag?: number; correspondent?: number; document_type?: number } = {},
   ) {
-    const c = this.connectors(role, "write")[0];
+    const c = this.writeConnector(role);
     await c.bulkEdit(ids, method, options);
   }
 }

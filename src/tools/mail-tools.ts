@@ -93,7 +93,12 @@ const sendInput = {
   subject: z.string().max(998).optional(),
   body: z.string().max(1_000_000),
   role: z.string().optional(),
-  account: z.string().optional(),
+  account: z
+    .string()
+    .min(1)
+    .describe(
+      "Sending account (see account_list); for replies and forwards the account holding the original",
+    ),
   reply_to: z.string().optional(),
   forward_id: z.string().optional(),
   signature: z.boolean().optional(),

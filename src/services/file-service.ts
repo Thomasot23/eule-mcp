@@ -6,6 +6,7 @@ import { cachedFileRead } from "../utils/file-cache.js";
 import { securePath, secureReadPath } from "../utils/path-sandbox.js";
 import {
   collectProviderResults,
+  requireConnector,
   selectConnector,
   type ProviderFailure,
 } from "./provider-orchestration.js";
@@ -60,12 +61,13 @@ export class FileService {
   ): Promise<FileResult> {
     const safe = secureReadPath(path);
     if (!existsSync(safe)) throw new Error(`File not found: ${path}`);
-    const connector = selectConnector(
+    const connector = requireConnector(
       this.registry.getFileConnectors(role, "write"),
       account,
+      "file",
       (candidate) => candidate.uploadFile != null,
     );
-    if (!connector?.uploadFile) throw new Error("No writable file connector found.");
+    if (!connector.uploadFile) throw new Error("No writable file connector found.");
     return connector.uploadFile(name ?? basename(safe), readFileSync(safe), parentId);
   }
 

@@ -80,7 +80,7 @@ export function registerFileTools(server: McpServer, files: FileService): void {
         name: z.string().optional(),
         parentId: z.string().optional(),
         role: z.string().optional(),
-        account: z.string().optional(),
+        account: z.string().min(1).describe("Account to act on (see account_list)"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },

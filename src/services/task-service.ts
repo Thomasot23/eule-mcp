@@ -7,7 +7,7 @@ import type {
 } from "../types/index.js";
 import {
   collectProviderResults,
-  selectConnector,
+  requireConnector,
   type ProviderFailure,
 } from "./provider-orchestration.js";
 
@@ -80,12 +80,12 @@ export class TaskService {
   async add(
     input: RemoteTaskInput & { role?: string; account?: string },
   ): Promise<{ task: RemoteTask; account: string; tier: string }> {
-    const target = selectConnector(
+    const target = requireConnector(
       this.registry.getTaskConnectors(input.role, "write"),
       input.account,
+      "task",
       (connector) => !connector.readOnly,
     );
-    if (!target) throw new Error("No writable task connector configured");
     const task = await target.createTask({
       title: input.title,
       notes: input.notes,

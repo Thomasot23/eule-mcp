@@ -15,7 +15,10 @@ export function registerContactTools(server: McpServer, contacts: ContactService
         organization: z.string().optional(),
         jobTitle: z.string().optional(),
         role: z.string().optional(),
-        account: z.string().optional(),
+        account: z
+          .string()
+          .optional()
+          .describe("Address book account; required unless local is true or none is configured"),
         local: z.boolean().optional(),
         notes: z.string().optional(),
       },

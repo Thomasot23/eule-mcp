@@ -3,7 +3,7 @@ import type { ConnectorRegistry } from "../connectors/index.js";
 import type { RemoteContact } from "../types/index.js";
 import {
   collectProviderResults,
-  selectConnector,
+  requireConnector,
   type ProviderFailure,
 } from "./provider-orchestration.js";
 
@@ -25,12 +25,13 @@ export class ContactService {
     notes?: string;
   }) {
     if (!input.local) {
-      const target = selectConnector(
-        this.registry.getContactConnectors(input.role, "write"),
-        input.account,
-        (connector) => !connector.readOnly,
-      );
-      if (target) {
+      const writable = this.registry
+        .getContactConnectors(input.role, "write")
+        .filter((connector) => !connector.readOnly);
+      // Without any remote address book the local store is the only target, so
+      // there is nothing to disambiguate. Otherwise the caller names the account.
+      if (writable.length > 0 || input.account) {
+        const target = requireConnector(writable, input.account, "contact");
         const contact = await target.createContact({
           displayName: input.name,
           email: input.email,

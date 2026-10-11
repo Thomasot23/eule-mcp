@@ -2,7 +2,7 @@ import type { ConnectorRegistry } from "../connectors/index.js";
 import type { CalendarEvent, CalendarEventInput, CalendarInfo } from "../types/index.js";
 import {
   collectProviderResults,
-  selectConnector,
+  requireConnector,
   type ProviderFailure,
 } from "./provider-orchestration.js";
 
@@ -41,12 +41,12 @@ export class CalendarService {
   }
   async create(event: CalendarEventInput, role?: string, account?: string): Promise<CalendarEvent> {
     validateRange(event.start, event.end);
-    const connector = selectConnector(
+    const connector = requireConnector(
       this.registry.getCalendarConnectors(role, "write"),
       account,
+      "calendar",
       (c) => !c.readOnly,
     );
-    if (!connector) throw new Error("No writable calendar connector found.");
     return connector.createEvent(event);
   }
   async update(
@@ -56,21 +56,21 @@ export class CalendarService {
     account?: string,
   ): Promise<CalendarEvent> {
     validateRange(updates.start, updates.end);
-    const connector = selectConnector(
+    const connector = requireConnector(
       this.registry.getCalendarConnectors(role, "write"),
       account,
+      "calendar",
       (c) => !c.readOnly,
     );
-    if (!connector) throw new Error("No writable calendar connector found.");
     return connector.updateEvent(id, updates);
   }
   async delete(id: string, role?: string, account?: string): Promise<void> {
-    const connector = selectConnector(
+    const connector = requireConnector(
       this.registry.getCalendarConnectors(role, "write"),
       account,
+      "calendar",
       (c) => !c.readOnly,
     );
-    if (!connector) throw new Error("No writable calendar connector found.");
     await connector.deleteEvent(id);
   }
 }

@@ -59,6 +59,7 @@ describe("MailService commands", () => {
       to: "to@example.com",
       subject: "Hello",
       body: "Body",
+      account: "sender@example.com",
       idempotencyKey: "request-123",
     };
     await Promise.all([instance.send(input), instance.send(input)]);
@@ -70,12 +71,14 @@ describe("MailService commands", () => {
     await instance.send({
       to: "to@example.com",
       body: "First",
+      account: "sender@example.com",
       idempotencyKey: "request-456",
     });
     await expect(
       instance.send({
         to: "other@example.com",
         body: "Different",
+        account: "sender@example.com",
         idempotencyKey: "request-456",
       }),
     ).rejects.toThrow(/different mail command/);
@@ -83,8 +86,29 @@ describe("MailService commands", () => {
 
   it("restores signature state after a signature-free send", async () => {
     const mail = connector();
-    await service(mail).send({ to: "to@example.com", body: "Body", signature: false });
+    await service(mail).send({
+      to: "to@example.com",
+      body: "Body",
+      account: "sender@example.com",
+      signature: false,
+    });
     expect(mail.signature).toBe("<p>Signature</p>");
+  });
+
+  it("refuses to send or draft without a sender account", async () => {
+    const mail = connector();
+    mail.createDraft = vi.fn(async () => {
+      throw new Error("must not be reached");
+    });
+    const instance = service(mail);
+    await expect(instance.send({ to: "to@example.com", body: "Body" })).rejects.toThrow(
+      "account is required for mail writes. Available: sender@example.com.",
+    );
+    await expect(instance.draft({ to: "to@example.com", body: "Body" })).rejects.toThrow(
+      /account is required for mail draft writes/,
+    );
+    expect(mail.sendMessage).not.toHaveBeenCalled();
+    expect(mail.createDraft).not.toHaveBeenCalled();
   });
 
   it("rejects an update with no action", async () => {

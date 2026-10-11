@@ -53,6 +53,25 @@ describe("CalendarService", () => {
   });
 });
 
+describe("CalendarService write targets", () => {
+  it("refuses a mutation without an account instead of using the first calendar", async () => {
+    const first = calendar("first");
+    const readOnly = calendar("shared", true);
+    const registry = {
+      getCalendarConnectors: () => [first, readOnly],
+    } as unknown as ConnectorRegistry;
+    const service = new CalendarService(registry);
+    await expect(
+      service.create({ subject: "x", start: "2026-01-01T10:00:00Z", end: "2026-01-01T11:00:00Z" }),
+    ).rejects.toThrow("account is required for calendar writes. Available: first.");
+    await expect(service.delete("event", undefined, "shared")).rejects.toThrow(
+      /No calendar connector for account "shared"/,
+    );
+    expect(first.createEvent).not.toHaveBeenCalled();
+    expect(readOnly.deleteEvent).not.toHaveBeenCalled();
+  });
+});
+
 describe("MessengerService", () => {
   it("scopes account routing through the requested role", async () => {
     const connector: MessengerConnector = {

@@ -6,7 +6,7 @@ import { resolveAttachmentPaths } from "../utils/outgoing-attachments.js";
 import { assertNoHeaderInjection } from "../utils/security.js";
 import {
   collectProviderResults,
-  selectConnector,
+  requireConnector,
   type ProviderFailure,
 } from "./provider-orchestration.js";
 
@@ -135,10 +135,18 @@ export class MailService {
     if (input.replyTo && input.forwardId)
       throw new Error("reply_to and forward_id are mutually exclusive");
     const operation = async (): Promise<string> => {
-      const connector = input.account
-        ? this.registry.getMailConnectorForAccount(input.account, input.role, "write")
-        : this.registry.getMailConnectors(input.role, "write")[0];
-      if (!connector) throw new Error("No mail connector available.");
+      // The registry lookup prefers a personal mailbox over a shared one with the
+      // same auth account; requireConnector only supplies the error with the
+      // accounts that would have been accepted.
+      const connector =
+        (input.account
+          ? this.registry.getMailConnectorForAccount(input.account, input.role, "write")
+          : undefined) ??
+        requireConnector(
+          this.registry.getMailConnectors(input.role, "write"),
+          input.account,
+          "mail",
+        );
       const to = parseRecipients(input.to, !input.replyTo) ?? [];
       const options = this.sendOptions(input);
       const attachmentNote = options.attachments?.length
@@ -180,12 +188,13 @@ export class MailService {
     }
   }
   async draft(input: MailSendInput): Promise<MailMessage> {
-    const connector = selectConnector(
+    const connector = requireConnector(
       this.registry.getMailConnectors(input.role, "write"),
       input.account,
+      "mail draft",
       (c) => c.createDraft != null,
     );
-    if (!connector?.createDraft) throw new Error("No mail connector with draft support found.");
+    if (!connector.createDraft) throw new Error("No mail connector with draft support found.");
     const createDraft = connector.createDraft.bind(connector);
     const to = parseRecipients(input.to, true) ?? [];
     return this.withSignature(connector, input.signature !== false, () =>

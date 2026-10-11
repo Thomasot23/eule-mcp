@@ -89,7 +89,7 @@ export function registerCalendarTools(server: McpServer, calendars: CalendarServ
     attendees: z.array(z.email()).max(500).optional(),
     calendarId: z.string().optional(),
     role: z.string().optional(),
-    account: z.string().optional(),
+    account: z.string().min(1).describe("Account to act on (see account_list)"),
   };
   server.registerTool(
     "calendar_create",
@@ -115,7 +115,7 @@ export function registerCalendarTools(server: McpServer, calendars: CalendarServ
         end: calendarDateTimeSchema.optional(),
         location: z.string().max(1000).optional(),
         role: z.string().optional(),
-        account: z.string().optional(),
+        account: z.string().min(1).describe("Account to act on (see account_list)"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     },
@@ -130,7 +130,11 @@ export function registerCalendarTools(server: McpServer, calendars: CalendarServ
     "calendar_delete",
     {
       description: "Delete a calendar event",
-      inputSchema: { id: z.string(), role: z.string().optional(), account: z.string().optional() },
+      inputSchema: {
+        id: z.string(),
+        role: z.string().optional(),
+        account: z.string().min(1).describe("Account holding the event (see account_list)"),
+      },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     },
     async ({ id, role, account }) =>

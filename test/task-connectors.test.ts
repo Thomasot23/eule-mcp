@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { applyComponentUpdates, readComponentProp } from "../src/providers/caldav/ics.js";
 import { TaskService } from "../src/services/task-service.js";
 import type { ConnectorRegistry } from "../src/connectors/index.js";
@@ -138,6 +138,15 @@ function serviceWith(connectors: TaskConnector[]): TaskService {
 }
 
 describe("TaskService", () => {
+  it("refuses to add a task without a target account", async () => {
+    const createTask = vi.fn(() => Promise.reject(new Error("must not be reached")));
+    const service = serviceWith([stub("graph", [], { createTask })]);
+    await expect(service.add({ title: "Call back" })).rejects.toThrow(
+      "account is required for task writes. Available: a@example.com.",
+    );
+    expect(createTask).not.toHaveBeenCalled();
+  });
+
   it("sorts open tasks before completed, then by due date, then title", async () => {
     const service = serviceWith([
       stub("graph", [

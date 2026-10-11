@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { collectProviderResults, selectConnector } from "../src/services/provider-orchestration.js";
+import {
+  collectProviderResults,
+  requireConnector,
+  selectConnector,
+} from "../src/services/provider-orchestration.js";
 
 describe("provider orchestration", () => {
   it("returns successful values and explicit per-account failures", async () => {
@@ -43,5 +47,33 @@ describe("provider orchestration", () => {
       2,
     );
     expect(peak).toBe(2);
+  });
+});
+
+describe("requireConnector", () => {
+  const connectors = [
+    { account: "a@example.com", writable: false },
+    { account: "b@example.com", writable: true },
+    { account: "c@example.com", writable: true },
+  ];
+
+  it("refuses a write without an account and lists the eligible accounts", () => {
+    expect(() => requireConnector(connectors, undefined, "mail", (c) => c.writable)).toThrow(
+      "account is required for mail writes. Available: b@example.com, c@example.com.",
+    );
+    expect(() => requireConnector(connectors, "  ", "mail")).toThrow(/account is required/);
+  });
+
+  it("refuses an account that is unknown or not eligible", () => {
+    expect(() => requireConnector(connectors, "a@example.com", "mail", (c) => c.writable)).toThrow(
+      'No mail connector for account "a@example.com". Available: b@example.com, c@example.com.',
+    );
+    expect(() => requireConnector([], "x@example.com", "task")).toThrow(
+      /No task account is available/,
+    );
+  });
+
+  it("returns the named account, case-insensitively", () => {
+    expect(requireConnector(connectors, "C@Example.com", "mail").account).toBe("c@example.com");
   });
 });

@@ -118,7 +118,7 @@ export function registerTaskTools(server: McpServer, tasks: TaskService): void {
         importance: importance.optional().describe("Priority"),
         list_id: z.string().optional().describe("Target list (from task_lists)"),
         role: z.string().optional().describe("Role ID"),
-        account: z.string().optional().describe("Target account"),
+        account: z.string().min(1).describe("Target account (see account_list)"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },

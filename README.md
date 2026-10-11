@@ -113,6 +113,14 @@ cannot be bypassed by selecting an account directly. These are work-context
 policies; stdio transport does not authenticate distinct human callers and is
 therefore not a substitute for multi-user RBAC.
 
+Writes never pick an account on their own. `mail_send`, `mail_draft`,
+`calendar_create`, `calendar_update`, `calendar_delete`, `task_add` and
+`file_upload` require `account`; without it the call fails and the error lists
+the accounts that would have been accepted. `contact_add` requires it as soon as
+a remote address book is configured (`local: true` stores locally). Document
+writes (`doc_upload`, `doc_tag`, `doc_bulk`) fail when the role leaves more than
+one writable Paperless instance.
+
 > **Configuration validation:** startup now fails closed on unknown keys,
 > malformed or insecure URLs/ports, invalid IDs, unsupported connector/domain
 > combinations, missing required fields, duplicate role IDs, and duplicate
