@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.0](https://github.com/metaneutrons/eule-mcp/compare/v0.7.1...v0.8.0) (2026-10-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **tools:** require an explicit account for write operations ([#95](https://github.com/metaneutrons/eule-mcp/issues/95))
+
+### Bug Fixes
+
+* **tools:** require an explicit account for write operations ([#95](https://github.com/metaneutrons/eule-mcp/issues/95)) ([38ef373](https://github.com/metaneutrons/eule-mcp/commit/38ef3737e2e47ebf0044126f68531d8f052eecc0))
+
 ## [0.7.1](https://github.com/metaneutrons/eule-mcp/compare/v0.7.0...v0.7.1) (2026-10-06)
 
 
