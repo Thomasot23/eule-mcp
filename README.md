@@ -504,6 +504,11 @@ roles:
           credentialRef: "connector/personal/documents/paperless.a1b2c3d4"
 ```
 
+IMAP connectors file a copy of every sent message in the server's Sent folder
+(found by its special-use flag, e.g. iCloud's "Sent Messages"), because plain
+SMTP submission does not. Gmail and Microsoft file sent mail themselves, so the
+copy is skipped there; `saveSentCopy: true|false` overrides the default.
+
 Opaque references are generated and maintained by Eule. Do not invent or copy
 them between machines; use `connector_configure`, `credential_rotate`, and
 `google_oauth_configure` so the referenced OS credential exists.

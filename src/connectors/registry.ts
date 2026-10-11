@@ -79,6 +79,7 @@ export class ConnectorRegistry {
               smtpHost: mc.smtpHost ?? "localhost",
               port: mc.port,
               smtpPort: mc.smtpPort,
+              saveSentCopy: mc.saveSentCopy,
               auth: mc.auth ?? "password",
               password: this.secrets.connector(mc),
             }),
@@ -172,6 +173,7 @@ export class ConnectorRegistry {
         smtpHost: mc.smtpHost ?? "localhost",
         port: mc.port,
         smtpPort: mc.smtpPort,
+        saveSentCopy: mc.saveSentCopy,
         auth: mc.auth ?? "password",
         password: this.secrets.connector(mc),
       });

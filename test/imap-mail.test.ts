@@ -445,3 +445,123 @@ describe("ImapMailConnector reply threading", () => {
     expect(options).not.toHaveProperty("references");
   });
 });
+
+describe("ImapMailConnector Sent copy", () => {
+  function client(mailboxes: { path: string; specialUse?: string }[]) {
+    return {
+      list: vi.fn(async () => mailboxes),
+      append: vi.fn(async (_mailbox: string, _raw: Buffer, _flags: string[]) => ({ uid: 7 })),
+      mailboxOpen: vi.fn(async () => undefined),
+      fetchOne: vi.fn(async () => ({ source: Buffer.from("Subject: draft\r\n\r\nbody") })),
+      messageFlagsAdd: vi.fn(async () => undefined),
+      messageDelete: vi.fn(async () => undefined),
+      logout: vi.fn(async () => undefined),
+    };
+  }
+
+  function sending(
+    imap: unknown,
+    smtpHost = "smtp.mail.me.com",
+    saveSentCopy?: boolean,
+  ): { connector: ImapMailConnector; sendMail: ReturnType<typeof vi.fn> } {
+    const connector = new ImapMailConnector("user@example.com", {
+      account: "user@example.com",
+      host: "imap.example.com",
+      smtpHost,
+      auth: "password",
+      password: "test",
+      ...(saveSentCopy === undefined ? {} : { saveSentCopy }),
+    });
+    const sendMail = vi.fn(async () => ({}));
+    Object.defineProperty(connector, "connect", { value: vi.fn(async () => imap) });
+    Object.defineProperty(connector, "makeTransport", {
+      value: vi.fn(async () => ({ sendMail, close: vi.fn() })),
+    });
+    return { connector, sendMail };
+  }
+
+  it("files the sent message in the server's \\Sent mailbox with the same Message-ID", async () => {
+    const imap = client([{ path: "INBOX" }, { path: "Sent Messages", specialUse: "\\Sent" }]);
+    const { connector, sendMail } = sending(imap);
+
+    const receipt = await connector.sendMessage(["to@example.com"], "Hi", "Body", {
+      bcc: ["hidden@example.com"],
+    });
+
+    expect(receipt).toEqual({});
+    const sent = (sendMail.mock.calls[0] as unknown as [{ messageId: string }])[0];
+    expect(imap.append).toHaveBeenCalledOnce();
+    const [mailbox, raw, flags] = imap.append.mock.calls[0] as unknown as [
+      string,
+      Buffer,
+      string[],
+    ];
+    expect(mailbox).toBe("Sent Messages");
+    expect(flags).toEqual(["\\Seen"]);
+    const copy = raw.toString();
+    expect(copy).toContain(`Message-ID: ${sent.messageId}`);
+    // The filed copy keeps Bcc, as mail clients do; the submission does not need it.
+    expect(copy).toContain("Bcc: hidden@example.com");
+  });
+
+  it("falls back to a mailbox named like Sent when the server has no special-use flags", async () => {
+    const imap = client([{ path: "INBOX" }, { path: "Sent" }]);
+    const { connector } = sending(imap);
+    await connector.sendMessage(["to@example.com"], "Hi", "Body");
+    expect(imap.append.mock.calls[0]?.[0]).toBe("Sent");
+  });
+
+  it("does not file a copy where the SMTP service does it itself", async () => {
+    for (const host of ["smtp.gmail.com", "smtp.office365.com"]) {
+      const imap = client([{ path: "Sent", specialUse: "\\Sent" }]);
+      const { connector, sendMail } = sending(imap, host);
+      await connector.sendMessage(["to@example.com"], "Hi", "Body");
+      expect(sendMail).toHaveBeenCalledOnce();
+      expect(imap.append).not.toHaveBeenCalled();
+    }
+  });
+
+  it("honours an explicit saveSentCopy setting", async () => {
+    const off = client([{ path: "Sent", specialUse: "\\Sent" }]);
+    await sending(off, "smtp.mail.me.com", false).connector.sendMessage(["a@b.de"], "x", "y");
+    expect(off.append).not.toHaveBeenCalled();
+    const on = client([{ path: "Sent", specialUse: "\\Sent" }]);
+    await sending(on, "smtp.gmail.com", true).connector.sendMessage(["a@b.de"], "x", "y");
+    expect(on.append).toHaveBeenCalledOnce();
+  });
+
+  it("reports a failed Sent copy as a warning, not as a failed send", async () => {
+    const imap = client([{ path: "Sent", specialUse: "\\Sent" }]);
+    imap.append.mockRejectedValueOnce(new Error("quota exceeded"));
+    const { connector, sendMail } = sending(imap);
+
+    const receipt = await connector.sendMessage(["to@example.com"], "Hi", "Body");
+
+    expect(sendMail).toHaveBeenCalledOnce();
+    expect(receipt.warning).toMatch(/Sent folder: quota exceeded/);
+  });
+
+  it("files a sent draft in the special-use Sent mailbox, not a literal 'Sent'", async () => {
+    const imap = client([
+      { path: "Drafts", specialUse: "\\Drafts" },
+      { path: "Sent Messages", specialUse: "\\Sent" },
+    ]);
+    const { connector, sendMail } = sending(imap);
+
+    await connector.sendDraft("Drafts/12");
+
+    expect(sendMail).toHaveBeenCalledOnce();
+    expect(imap.messageDelete).toHaveBeenCalledWith("12", { uid: true });
+    expect(imap.append).toHaveBeenCalledWith("Sent Messages", expect.any(Buffer), ["\\Seen"]);
+  });
+
+  it("creates drafts in the server's \\Drafts mailbox", async () => {
+    const imap = client([{ path: "Entwürfe", specialUse: "\\Drafts" }]);
+    const { connector } = sending(imap);
+
+    const draft = await connector.createDraft(["to@example.com"], "Hi", "Body");
+
+    expect(imap.append.mock.calls[0]?.[0]).toBe("Entwürfe");
+    expect(draft.id).toBe("Entw%C3%BCrfe/7");
+  });
+});

@@ -18,6 +18,10 @@ const MAIL_FOLDER_ALIASES: ReadonlyMap<string, WellKnownMailFolder> = new Map([
   ["archiv", "archive"],
   ["sentitems", "sentitems"],
   ["sent", "sentitems"],
+  ["sentmessages", "sentitems"],
+  ["sentmail", "sentitems"],
+  ["gesendeteobjekte", "sentitems"],
+  ["gesendetenachrichten", "sentitems"],
   ["gesendeteelemente", "sentitems"],
   ["gesendet", "sentitems"],
   ["drafts", "drafts"],
@@ -27,6 +31,8 @@ const MAIL_FOLDER_ALIASES: ReadonlyMap<string, WellKnownMailFolder> = new Map([
   ["deleteditems", "deleteditems"],
   ["deleted", "deleteditems"],
   ["trash", "deleteditems"],
+  ["deletedmessages", "deleteditems"],
+  ["bin", "deleteditems"],
   ["papierkorb", "deleteditems"],
   ["geloschteelemente", "deleteditems"],
   ["geloeschteelemente", "deleteditems"],
@@ -34,6 +40,7 @@ const MAIL_FOLDER_ALIASES: ReadonlyMap<string, WellKnownMailFolder> = new Map([
   ["junk", "junkemail"],
   ["spam", "junkemail"],
   ["junkemails", "junkemail"],
+  ["junkmail", "junkemail"],
   ["outbox", "outbox"],
   ["postausgang", "outbox"],
 ]);
@@ -61,4 +68,12 @@ export function normalizeMailFolder(folder: string): string {
 /** True when a caller actually named a folder, as opposed to omitting it. */
 export function hasFolder(folder: string | undefined): folder is string {
   return folder !== undefined && folder.trim() !== "";
+}
+
+/**
+ * True for an opaque Exchange folder id (Graph and EWS ids are long base64
+ * tokens such as "AAMkAG…"), as opposed to a display name a caller typed.
+ */
+export function looksLikeFolderId(folder: string): boolean {
+  return /^[A-Za-z0-9+/_=-]{40,}$/.test(folder.trim());
 }

@@ -19,6 +19,10 @@ const connectorInputSchema = {
   port: z.number().int().min(1).max(65535).optional(),
   smtpHost: z.string().trim().min(1).optional(),
   smtpPort: z.number().int().min(1).max(65535).optional(),
+  saveSentCopy: z
+    .boolean()
+    .optional()
+    .describe("IMAP: file sent mail in the Sent folder (default true; off for Gmail/Microsoft)"),
   url: z.url().optional(),
   signalCliUrl: z.url().optional(),
 } as const;

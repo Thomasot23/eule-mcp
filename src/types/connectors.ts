@@ -80,6 +80,15 @@ export interface CalendarEventInput {
   readonly calendarId?: string;
 }
 
+/**
+ * What a connector reports about a send beyond "it went out". A warning never
+ * means the message failed: it was delivered, but something after delivery
+ * (such as filing the copy in the Sent folder) did not work.
+ */
+export interface SendReceipt {
+  readonly warning?: string;
+}
+
 /** Mail connector interface — implemented per API tier. */
 export interface MailConnector {
   readonly account: string;
@@ -107,16 +116,26 @@ export interface MailConnector {
    * let a provider silently search the whole mailbox.
    */
   searchMessages(query: string, limit?: number, folder?: string): Promise<MailMessage[]>;
-  sendMessage(to: string[], subject: string, body: string, opts?: MailSendOpts): Promise<void>;
+  sendMessage(
+    to: string[],
+    subject: string,
+    body: string,
+    opts?: MailSendOpts,
+  ): Promise<SendReceipt>;
   createDraft?(
     to: string[],
     subject: string,
     body: string,
     opts?: MailSendOpts,
   ): Promise<MailMessage>;
-  sendDraft?(id: string): Promise<void>;
-  replyToMessage(id: string, body: string, opts?: MailSendOpts): Promise<void>;
-  forwardMessage(id: string, to: string[], body?: string, opts?: MailSendOpts): Promise<void>;
+  sendDraft?(id: string): Promise<SendReceipt>;
+  replyToMessage(id: string, body: string, opts?: MailSendOpts): Promise<SendReceipt>;
+  forwardMessage(
+    id: string,
+    to: string[],
+    body?: string,
+    opts?: MailSendOpts,
+  ): Promise<SendReceipt>;
   downloadAttachment(messageId: string, attachmentId: string): Promise<Buffer>;
   markRead(id: string, isRead: boolean): Promise<void>;
   moveMessage(id: string, folder: string): Promise<void>;

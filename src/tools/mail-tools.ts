@@ -250,8 +250,8 @@ export function registerMailTools(
     },
     async ({ id, account, role, idempotency_key }) =>
       executeTool("mail_send_draft", async () => {
-        await mail.sendDraft(id, account, role, idempotency_key);
-        return textResult("✅ Draft sent successfully");
+        const warning = await mail.sendDraft(id, account, role, idempotency_key);
+        return textResult(`✅ Draft sent successfully${warning ? `\n⚠️ ${warning}` : ""}`);
       }),
   );
   server.registerTool(

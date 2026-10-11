@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { ImapFlow } from "imapflow";
-import { createTransport, type Transporter } from "nodemailer";
+import { createTransport, type SendMailOptions, type Transporter } from "nodemailer";
+import MailComposer from "nodemailer/lib/mail-composer";
 import {
   hasFolder,
   wellKnownMailFolder,
@@ -19,6 +21,7 @@ import type {
   MailMessageFull,
   MailSendOpts,
   OutgoingAttachment,
+  SendReceipt,
 } from "../../types/index.js";
 
 /** Map connector attachments to nodemailer's attachment shape. */
@@ -160,12 +163,29 @@ const SPECIAL_USE: Partial<Record<WellKnownMailFolder, string>> = {
   junkemail: "\\Junk",
 };
 
+/** Mailbox names tried when a server announces no special-use flag for them. */
+const FALLBACK_MAILBOXES: Readonly<Record<"\\Sent" | "\\Drafts", readonly string[]>> = {
+  "\\Sent": ["Sent Messages", "Sent", "Sent Items", "Gesendet", "Gesendete Objekte"],
+  "\\Drafts": ["Drafts", "Entwürfe"],
+};
+
+/**
+ * SMTP services that file every submitted message in Sent themselves. A copy
+ * appended over IMAP would show up twice there.
+ */
+const SERVER_FILES_SENT = /(^|\.)(gmail\.com|googlemail\.com|office365\.com|outlook\.com)$/i;
+
 export interface ImapConfig {
   account: string;
   host: string;
   port?: number;
   smtpHost: string;
   smtpPort?: number;
+  /**
+   * Append a copy of every sent message to the Sent mailbox. Defaults to true,
+   * except for SMTP services that file sent mail themselves (Gmail, Microsoft).
+   */
+  saveSentCopy?: boolean;
   auth: "oauth" | "password";
   getToken?: () => Promise<string | null>;
   password?: string;
@@ -241,6 +261,26 @@ export class ImapMailConnector implements MailConnector {
     if (!specialUse) return folder;
     const mailboxes = await client.list();
     return mailboxes.find((box) => box.specialUse === specialUse)?.path ?? folder;
+  }
+
+  /**
+   * Mailbox carrying a special-use flag (`\\Sent`, `\\Drafts`). Servers name these
+   * differently (iCloud "Sent Messages", Dovecot "Sent"), so the flag decides;
+   * without one, the first existing mailbox with a common name wins.
+   */
+  private async specialMailbox(client: ImapFlow, use: "\\Sent" | "\\Drafts"): Promise<string> {
+    const mailboxes = await client.list();
+    const flagged = mailboxes.find((box) => box.specialUse === use);
+    if (flagged) return flagged.path;
+    const candidates = FALLBACK_MAILBOXES[use];
+    const byName = candidates.find((name) =>
+      mailboxes.some((box) => box.path.toLowerCase() === name.toLowerCase()),
+    );
+    const fallback = byName ?? candidates[0];
+    if (!fallback) throw new Error(`No ${use} mailbox`);
+    return (
+      mailboxes.find((box) => box.path.toLowerCase() === fallback.toLowerCase())?.path ?? fallback
+    );
   }
 
   /**
@@ -478,45 +518,81 @@ export class ImapMailConnector implements MailConnector {
     });
   }
 
+  private get savesSentCopy(): boolean {
+    return this.cfg.saveSentCopy ?? !SERVER_FILES_SENT.test(this.cfg.smtpHost);
+  }
+
+  /**
+   * Sends over SMTP, then files the same message in Sent. Message-ID and Date
+   * are fixed up front so the filed copy is the message the recipients got;
+   * unlike the submitted one it keeps the Bcc header, as mail clients do.
+   * Filing happens after delivery, so its failure is reported as a warning
+   * and never turns a delivered message into an error.
+   */
+  private async deliver(mail: SendMailOptions): Promise<SendReceipt> {
+    const domain = this.account.split("@")[1] ?? "localhost";
+    const message: SendMailOptions = {
+      ...mail,
+      messageId: `<${randomUUID()}@${domain}>`,
+      date: new Date(),
+    };
+    const transport = await this.makeTransport();
+    try {
+      await transport.sendMail(message);
+    } finally {
+      transport.close();
+    }
+    if (!this.savesSentCopy) return {};
+    const node = new MailComposer(message).compile();
+    node.keepBcc = true;
+    return this.fileSent(await node.build());
+  }
+
+  private async fileSent(raw: Buffer | string): Promise<SendReceipt> {
+    try {
+      const client = await this.connect();
+      try {
+        const mailbox = await this.specialMailbox(client, "\\Sent");
+        await client.append(mailbox, raw, ["\\Seen"]);
+        return {};
+      } finally {
+        await client.logout();
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return { warning: `Sent, but the copy could not be saved to the Sent folder: ${reason}` };
+    }
+  }
+
   async sendMessage(
     to: string[],
     subject: string,
     body: string,
     opts?: MailSendOpts,
-  ): Promise<void> {
-    const transport = await this.makeTransport();
-    try {
-      await transport.sendMail({
-        from: this.fromAddress,
-        to: assertSafeAddresses(to, "To").join(", "),
-        cc: opts?.cc && assertSafeAddresses(opts.cc, "Cc").join(", "),
-        bcc: opts?.bcc && assertSafeAddresses(opts.bcc, "Bcc").join(", "),
-        subject,
-        html: assembleHtml(body, this.signature),
-        attachments: nodemailerAttachments(opts?.attachments),
-      });
-    } finally {
-      transport.close();
-    }
+  ): Promise<SendReceipt> {
+    return this.deliver({
+      from: this.fromAddress,
+      to: assertSafeAddresses(to, "To").join(", "),
+      cc: opts?.cc && assertSafeAddresses(opts.cc, "Cc").join(", "),
+      bcc: opts?.bcc && assertSafeAddresses(opts.bcc, "Bcc").join(", "),
+      subject,
+      html: assembleHtml(body, this.signature),
+      attachments: nodemailerAttachments(opts?.attachments),
+    });
   }
 
-  async replyToMessage(id: string, body: string, opts?: MailSendOpts): Promise<void> {
+  async replyToMessage(id: string, body: string, opts?: MailSendOpts): Promise<SendReceipt> {
     const { message: original, thread } = await this.fetchFull(id);
-    const transport = await this.makeTransport();
-    try {
-      await transport.sendMail({
-        from: this.fromAddress,
-        to: assertNoHeaderInjection(original.from, "To"),
-        cc: opts?.cc && assertSafeAddresses(opts.cc, "Cc").join(", "),
-        bcc: opts?.bcc && assertSafeAddresses(opts.bcc, "Bcc").join(", "),
-        subject: `Re: ${original.subject}`,
-        html: assembleHtml(body, this.signature),
-        ...replyThreadHeaders(thread),
-        attachments: nodemailerAttachments(opts?.attachments),
-      });
-    } finally {
-      transport.close();
-    }
+    return this.deliver({
+      from: this.fromAddress,
+      to: assertNoHeaderInjection(original.from, "To"),
+      cc: opts?.cc && assertSafeAddresses(opts.cc, "Cc").join(", "),
+      bcc: opts?.bcc && assertSafeAddresses(opts.bcc, "Bcc").join(", "),
+      subject: `Re: ${original.subject}`,
+      html: assembleHtml(body, this.signature),
+      ...replyThreadHeaders(thread),
+      attachments: nodemailerAttachments(opts?.attachments),
+    });
   }
 
   async forwardMessage(
@@ -524,28 +600,23 @@ export class ImapMailConnector implements MailConnector {
     to: string[],
     body?: string,
     opts?: MailSendOpts,
-  ): Promise<void> {
+  ): Promise<SendReceipt> {
     // A forward starts a new conversation for its recipients, so unlike a reply
     // it carries neither In-Reply-To nor References.
     const original = await this.getMessage(id);
-    const transport = await this.makeTransport();
-    try {
-      await transport.sendMail({
-        from: this.fromAddress,
-        to: assertSafeAddresses(to, "To").join(", "),
-        cc: opts?.cc && assertSafeAddresses(opts.cc, "Cc").join(", "),
-        bcc: opts?.bcc && assertSafeAddresses(opts.bcc, "Bcc").join(", "),
-        subject: `Fwd: ${original.subject}`,
-        html: assembleHtml(
-          body ?? "",
-          this.signature,
-          `<p><b>Von:</b> ${original.from}<br><b>Betreff:</b> ${original.subject}</p><pre>${original.body}</pre>`,
-        ),
-        attachments: nodemailerAttachments(opts?.attachments),
-      });
-    } finally {
-      transport.close();
-    }
+    return this.deliver({
+      from: this.fromAddress,
+      to: assertSafeAddresses(to, "To").join(", "),
+      cc: opts?.cc && assertSafeAddresses(opts.cc, "Cc").join(", "),
+      bcc: opts?.bcc && assertSafeAddresses(opts.bcc, "Bcc").join(", "),
+      subject: `Fwd: ${original.subject}`,
+      html: assembleHtml(
+        body ?? "",
+        this.signature,
+        `<p><b>Von:</b> ${original.from}<br><b>Betreff:</b> ${original.subject}</p><pre>${original.body}</pre>`,
+      ),
+      attachments: nodemailerAttachments(opts?.attachments),
+    });
   }
 
   async createDraft(
@@ -567,13 +638,14 @@ export class ImapMailConnector implements MailConnector {
     );
     const client = await this.connect();
     try {
-      const result = await client.append("Drafts", Buffer.from(mime), ["\\Draft", "\\Seen"]);
+      const drafts = await this.specialMailbox(client, "\\Drafts");
+      const result = await client.append(drafts, Buffer.from(mime), ["\\Draft", "\\Seen"]);
       const uid =
         result && typeof result === "object"
           ? Number((result as unknown as Record<string, unknown>).uid) || 0
           : 0;
       return {
-        id: uid ? formatImapId("Drafts", uid) : "",
+        id: uid ? formatImapId(drafts, uid) : "",
         account: this.account,
         subject,
         from: this.account,
@@ -587,15 +659,16 @@ export class ImapMailConnector implements MailConnector {
     }
   }
 
-  async sendDraft(id: string): Promise<void> {
+  async sendDraft(id: string): Promise<SendReceipt> {
     const { mailbox, uid } = parseImapId(id, "Drafts");
     const client = await this.connect();
+    let raw: Buffer;
     try {
       await client.mailboxOpen(mailbox);
       const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
       if (!msg || typeof msg !== "object" || !("source" in msg) || !msg.source)
         throw new Error(`Draft ${id} not found`);
-      const raw = msg.source.toString();
+      raw = msg.source;
 
       const transport = await this.makeTransport();
       try {
@@ -604,13 +677,13 @@ export class ImapMailConnector implements MailConnector {
         transport.close();
       }
 
-      // Move to Sent, delete from Drafts
-      await client.append("Sent", Buffer.from(raw), ["\\Seen"]);
+      // Delivered: the draft is spent whether or not the Sent copy works out.
       await client.messageFlagsAdd(String(uid), ["\\Deleted"], { uid: true });
       await client.messageDelete(String(uid), { uid: true });
     } finally {
       await client.logout();
     }
+    return this.savesSentCopy ? this.fileSent(raw) : {};
   }
 
   /**

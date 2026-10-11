@@ -4,6 +4,7 @@ import type {
   MailMessage,
   MailMessageFull,
   MailSendOpts,
+  SendReceipt,
 } from "../../types/index.js";
 import { fetchWithExecutionContext as fetch } from "../../utils/execution-context.js";
 import {
@@ -174,7 +175,7 @@ export class GoogleMailConnector implements MailConnector {
     subject: string,
     body: string,
     opts?: MailSendOpts,
-  ): Promise<void> {
+  ): Promise<SendReceipt> {
     const h = await this.headers();
     const mime = buildMimeMessage(
       {
@@ -194,6 +195,7 @@ export class GoogleMailConnector implements MailConnector {
       body: JSON.stringify({ raw }),
     });
     if (!res.ok) throw new Error(`Gmail send: ${String(res.status)} ${await res.text()}`);
+    return {};
   }
 
   async createDraft(
@@ -234,7 +236,7 @@ export class GoogleMailConnector implements MailConnector {
     };
   }
 
-  async sendDraft(id: string): Promise<void> {
+  async sendDraft(id: string): Promise<SendReceipt> {
     const h = await this.headers();
     const res = await fetch(`${BASE}/drafts/send`, {
       method: "POST",
@@ -242,9 +244,10 @@ export class GoogleMailConnector implements MailConnector {
       body: JSON.stringify({ id }),
     });
     if (!res.ok) throw new Error(`Gmail sendDraft: ${String(res.status)} ${await res.text()}`);
+    return {};
   }
 
-  async replyToMessage(id: string, body: string, opts?: MailSendOpts): Promise<void> {
+  async replyToMessage(id: string, body: string, opts?: MailSendOpts): Promise<SendReceipt> {
     const h = await this.headers();
     const orig = await this.fetchMsg(id, h);
     if (!orig) throw new Error("Original not found");
@@ -271,6 +274,7 @@ export class GoogleMailConnector implements MailConnector {
       body: JSON.stringify({ raw, threadId: orig.threadId }),
     });
     if (!res.ok) throw new Error(`Gmail reply: ${String(res.status)}`);
+    return {};
   }
 
   async forwardMessage(
@@ -278,7 +282,7 @@ export class GoogleMailConnector implements MailConnector {
     to: string[],
     body?: string,
     opts?: MailSendOpts,
-  ): Promise<void> {
+  ): Promise<SendReceipt> {
     const orig = await this.getMessage(id);
     const origBody = orig.bodyType === "html" ? orig.body : `<pre>${orig.body}</pre>`;
     const html = assembleHtml(
@@ -305,6 +309,7 @@ export class GoogleMailConnector implements MailConnector {
       body: JSON.stringify({ raw }),
     });
     if (!res.ok) throw new Error(`Gmail forward: ${String(res.status)}`);
+    return {};
   }
 
   async markRead(id: string, isRead: boolean): Promise<void> {

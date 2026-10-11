@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { hasFolder, normalizeMailFolder, wellKnownMailFolder } from "../src/utils/mail-folders.js";
+import {
+  hasFolder,
+  looksLikeFolderId,
+  normalizeMailFolder,
+  wellKnownMailFolder,
+} from "../src/utils/mail-folders.js";
 
 describe("normalizeMailFolder", () => {
   it.each([
@@ -10,6 +15,9 @@ describe("normalizeMailFolder", () => {
     ["Posteingang", "inbox"],
     ["Sent Items", "sentitems"],
     ["Gesendete Elemente", "sentitems"],
+    ["Sent Messages", "sentitems"],
+    ["Gesendete Objekte", "sentitems"],
+    ["Deleted Messages", "deleteditems"],
     ["Entwürfe", "drafts"],
     ["Deleted Items", "deleteditems"],
     ["Gelöschte Elemente", "deleteditems"],
@@ -39,5 +47,13 @@ describe("hasFolder", () => {
     expect(hasFolder("")).toBe(false);
     expect(hasFolder("  ")).toBe(false);
     expect(hasFolder("Archive")).toBe(true);
+  });
+});
+
+describe("looksLikeFolderId", () => {
+  it("tells opaque Exchange ids from display names", () => {
+    expect(looksLikeFolderId(`AAMkAG${"Q".repeat(60)}=`)).toBe(true);
+    expect(looksLikeFolderId("Projekte 2026")).toBe(false);
+    expect(looksLikeFolderId("sentitems")).toBe(false);
   });
 });

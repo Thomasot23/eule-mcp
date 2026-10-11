@@ -1,5 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
-import { hasFolder, normalizeMailFolder } from "../../utils/mail-folders.js";
+import { hasFolder, looksLikeFolderId, wellKnownMailFolder } from "../../utils/mail-folders.js";
 import { assembleHtml } from "../../utils/mail-html.js";
 import { assertResponseSize, escapeXml, fetchWithTimeout } from "../../utils/security.js";
 import type {
@@ -9,6 +9,7 @@ import type {
   MailAttachment,
   MailSendOpts,
   OutgoingAttachment,
+  SendReceipt,
 } from "../../types/index.js";
 
 const EWS_URL = "https://outlook.office365.com/EWS/Exchange.asmx";
@@ -65,9 +66,50 @@ export class EwsMailConnector implements MailConnector {
     private readonly shared = false,
   ) {}
 
+  /**
+   * FolderId XML for a name: well-known names become a DistinguishedFolderId,
+   * an opaque id a FolderId, anything else is looked up by display name below
+   * the message root. Undefined when no folder has that name.
+   */
+  private async folderRef(name: string): Promise<string | undefined> {
+    const known = wellKnownMailFolder(name);
+    if (known) return this.folderId(known);
+    const folder = name.trim();
+    if (looksLikeFolderId(folder)) return `<t:FolderId Id="${escapeXml(folder)}"/>`;
+    const data = await this.post(`
+    <m:FindFolder Traversal="Deep">
+      <m:FolderShape><t:BaseShape>IdOnly</t:BaseShape></m:FolderShape>
+      <m:Restriction>
+        <t:IsEqualTo>
+          <t:FieldURI FieldURI="folder:DisplayName"/>
+          <t:FieldURIOrConstant><t:Constant Value="${escapeXml(folder)}"/></t:FieldURIOrConstant>
+        </t:IsEqualTo>
+      </m:Restriction>
+      <m:ParentFolderIds>${this.folderId("msgfolderroot")}</m:ParentFolderIds>
+    </m:FindFolder>`);
+    const folders = dig(
+      data,
+      "Envelope",
+      "Body",
+      "FindFolderResponse",
+      "ResponseMessages",
+      "FindFolderResponseMessage",
+      "RootFolder",
+      "Folders",
+    ) as Record<string, unknown> | undefined;
+    const first = Object.values(folders ?? {}).flat()[0];
+    const id = dig(first, "FolderId", "@_Id");
+    return typeof id === "string" ? `<t:FolderId Id="${escapeXml(id)}"/>` : undefined;
+  }
+
+  private async requireFolder(name: string): Promise<string> {
+    const ref = await this.folderRef(name);
+    if (!ref) throw new Error(`Mail folder "${name}" not found in ${this.account}`);
+    return ref;
+  }
+
   /** Build DistinguishedFolderId XML, with Mailbox for shared mailboxes. */
-  private folderId(name: string): string {
-    const folder = normalizeMailFolder(name);
+  private folderId(folder: string): string {
     if (this.shared) {
       return `<t:DistinguishedFolderId Id="${escapeXml(folder)}"><t:Mailbox><t:EmailAddress>${escapeXml(this.account)}</t:EmailAddress></t:Mailbox></t:DistinguishedFolderId>`;
     }
@@ -92,6 +134,7 @@ export class EwsMailConnector implements MailConnector {
   }
 
   async listMessages(folder = "inbox", limit = 10): Promise<MailMessage[]> {
+    const parent = await this.requireFolder(folder);
     const data = await this.post(`
     <m:FindItem Traversal="Shallow">
       <m:ItemShape>
@@ -109,7 +152,7 @@ export class EwsMailConnector implements MailConnector {
         <t:FieldOrder Order="Descending"><t:FieldURI FieldURI="item:DateTimeReceived"/></t:FieldOrder>
       </m:SortOrder>
       <m:ParentFolderIds>
-        ${this.folderId(folder)}
+        ${parent}
       </m:ParentFolderIds>
     </m:FindItem>`);
 
@@ -205,7 +248,11 @@ export class EwsMailConnector implements MailConnector {
   }
 
   async searchMessages(query: string, limit = 10, folder?: string): Promise<MailMessage[]> {
-    if (hasFolder(folder)) return this.findInFolder(this.folderId(folder), query, limit);
+    if (hasFolder(folder)) {
+      // A folder this mailbox does not have narrows the search to nothing.
+      const parent = await this.folderRef(folder);
+      return parent ? this.findInFolder(parent, query, limit) : [];
+    }
 
     // EWS refuses a QueryString across several ParentFolderIds ("Shared folder
     // search cannot be performed on multiple folders"), and FindItem has no deep
@@ -311,13 +358,13 @@ export class EwsMailConnector implements MailConnector {
     subject: string,
     body: string,
     opts?: MailSendOpts,
-  ): Promise<void> {
+  ): Promise<SendReceipt> {
     // EWS has no way to send a typed Message with attachments in one call, so
     // when attachments are present we save a draft, attach, then send it.
     if (opts?.attachments?.length) {
       const draft = await this.createDraft(to, subject, body, opts);
       await this.sendDraft(draft.id);
-      return;
+      return {};
     }
     const html = assembleHtml(body, this.signature);
     const ccXml = opts?.cc?.length
@@ -339,6 +386,7 @@ export class EwsMailConnector implements MailConnector {
         </t:Message>
       </m:Items>
     </m:CreateItem>`);
+    return {};
   }
 
   /**
@@ -431,7 +479,7 @@ export class EwsMailConnector implements MailConnector {
     return "";
   }
 
-  async sendDraft(id: string): Promise<void> {
+  async sendDraft(id: string): Promise<SendReceipt> {
     await this.post(`
     <m:SendItem SaveItemToFolder="true">
       <m:ItemIds>
@@ -439,9 +487,10 @@ export class EwsMailConnector implements MailConnector {
       </m:ItemIds>
       <m:SavedItemFolderId><t:DistinguishedFolderId Id="sentitems" /></m:SavedItemFolderId>
     </m:SendItem>`);
+    return {};
   }
 
-  async replyToMessage(id: string, body: string, opts?: MailSendOpts): Promise<void> {
+  async replyToMessage(id: string, body: string, opts?: MailSendOpts): Promise<SendReceipt> {
     if (opts?.attachments?.length)
       throw new Error(
         "EWS tier: attachments on reply are not supported — send a new message with attachments, or create a draft.",
@@ -456,6 +505,7 @@ export class EwsMailConnector implements MailConnector {
         </t:ReplyToItem>
       </m:Items>
     </m:CreateItem>`);
+    return {};
   }
 
   async forwardMessage(
@@ -463,7 +513,7 @@ export class EwsMailConnector implements MailConnector {
     to: string[],
     body?: string,
     opts?: MailSendOpts,
-  ): Promise<void> {
+  ): Promise<SendReceipt> {
     if (opts?.attachments?.length)
       throw new Error(
         "EWS tier: attachments on forward are not supported — send a new message with attachments, or create a draft.",
@@ -481,6 +531,7 @@ export class EwsMailConnector implements MailConnector {
         </t:ForwardItem>
       </m:Items>
     </m:CreateItem>`);
+    return {};
   }
 
   async markRead(id: string, isRead: boolean): Promise<void> {
@@ -501,10 +552,11 @@ export class EwsMailConnector implements MailConnector {
   }
 
   async moveMessage(id: string, folder: string): Promise<void> {
+    const target = await this.requireFolder(folder);
     await this.post(`
     <m:MoveItem>
       <m:ToFolderId>
-        ${this.folderId(folder)}
+        ${target}
       </m:ToFolderId>
       <m:ItemIds>
         <t:ItemId Id="${escapeXml(id)}"/>

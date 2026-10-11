@@ -11,6 +11,11 @@ export interface ConnectorConfig {
   readonly port?: number;
   readonly smtpHost?: string;
   readonly smtpPort?: number;
+  /**
+   * File a copy of sent mail in the Sent mailbox over IMAP. Defaults to true,
+   * except for SMTP services that do this themselves (Gmail, Microsoft).
+   */
+  readonly saveSentCopy?: boolean;
   readonly auth?: "oauth" | "password";
   readonly password?: string;
   /** Opaque key in the OS credential store. Preferred over inline secrets. */

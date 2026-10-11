@@ -31,6 +31,7 @@ export interface ConnectorConfigureInput {
   readonly port?: number;
   readonly smtpHost?: string;
   readonly smtpPort?: number;
+  readonly saveSentCopy?: boolean;
   readonly url?: string;
   readonly signalCliUrl?: string;
 }
@@ -105,6 +106,7 @@ export class ConfigurationControlService {
       ...(input.port !== undefined ? { port: input.port } : {}),
       ...(input.smtpHost ? { smtpHost: input.smtpHost } : {}),
       ...(input.smtpPort !== undefined ? { smtpPort: input.smtpPort } : {}),
+      ...(input.saveSentCopy !== undefined ? { saveSentCopy: input.saveSentCopy } : {}),
       ...(input.url ? { url: input.url } : {}),
       ...(input.signalCliUrl ? { signalCliUrl: input.signalCliUrl } : {}),
       ...(input.type === "imap" ? { auth: "password" as const } : {}),

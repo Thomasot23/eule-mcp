@@ -23,9 +23,9 @@ function connector(): MailConnector {
       attachments: [],
     })),
     searchMessages: vi.fn(async () => []),
-    sendMessage: vi.fn(async () => undefined),
-    replyToMessage: vi.fn(async () => undefined),
-    forwardMessage: vi.fn(async () => undefined),
+    sendMessage: vi.fn(async () => ({})),
+    replyToMessage: vi.fn(async () => ({})),
+    forwardMessage: vi.fn(async () => ({})),
     downloadAttachment: vi.fn(async () => Buffer.alloc(0)),
     markRead: vi.fn(async () => undefined),
     moveMessage: vi.fn(async () => undefined),
@@ -121,7 +121,7 @@ describe("MailService commands", () => {
     vi.useFakeTimers();
     try {
       const mail = connector();
-      mail.sendDraft = vi.fn(async () => undefined);
+      mail.sendDraft = vi.fn(async () => ({}));
       const instance = service(mail);
       await instance.sendDraft("draft-1", mail.account, undefined, "request-1");
       await instance.sendDraft("draft-1", mail.account, undefined, "request-1");

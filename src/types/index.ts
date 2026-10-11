@@ -31,6 +31,7 @@ export type {
   FileResult,
   MailConnector,
   MailSendOpts,
+  SendReceipt,
   CalendarConnector,
   ContactConnector,
   MessengerConnector,

@@ -45,13 +45,39 @@ describe("GraphMailConnector folder scope", () => {
   it("scopes the search to a folder and normalises its name", async () => {
     const calls = recordFetch(() => json({ value: [] }));
     await graph().searchMessages("invoice", 5, "Posteingang");
-    await graph().searchMessages("invoice", 5, "Projekte 2026");
+    await graph().searchMessages("invoice", 5, "Sent Messages");
     await graph(true).searchMessages("invoice", 5, "Archiv");
     expect(calls.map((c) => c.url.split("?")[0])).toEqual([
       "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages",
-      "https://graph.microsoft.com/v1.0/me/mailFolders/Projekte%202026/messages",
+      "https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages",
       "https://graph.microsoft.com/v1.0/users/user@example.com/mailFolders/archive/messages",
     ]);
+  });
+
+  it("resolves a custom folder by display name and passes an opaque id through", async () => {
+    const id = `AAMkAG${"x".repeat(60)}`;
+    const calls = recordFetch((url) =>
+      url.includes("/mailFolders?") ? json({ value: [{ id: "folder-42" }] }) : json({ value: [] }),
+    );
+    await graph().searchMessages("invoice", 5, "Projekte 2026");
+    await graph().searchMessages("invoice", 5, id);
+    expect(decodeURIComponent(calls[0]?.url ?? "")).toContain(
+      "/me/mailFolders?$filter=displayName eq 'Projekte 2026'",
+    );
+    expect(calls[1]?.url.split("?")[0]).toBe(
+      "https://graph.microsoft.com/v1.0/me/mailFolders/folder-42/messages",
+    );
+    expect(calls[2]?.url.split("?")[0]).toBe(
+      `https://graph.microsoft.com/v1.0/me/mailFolders/${id}/messages`,
+    );
+  });
+
+  it("narrows a search to nothing for a folder the mailbox lacks, but fails list and move", async () => {
+    const calls = recordFetch(() => json({ value: [] }));
+    await expect(graph().searchMessages("invoice", 5, "Nicht da")).resolves.toEqual([]);
+    expect(calls).toHaveLength(1);
+    await expect(graph().listMessages("Nicht da")).rejects.toThrow(/"Nicht da" not found/);
+    await expect(graph().moveMessage("msg-1", "Nicht da")).rejects.toThrow(/not found/);
   });
 
   it("normalises folder names when listing and moving", async () => {
@@ -187,6 +213,36 @@ describe("EwsMailConnector folder scope", () => {
       body.includes("<m:FindFolder") ? xml(listing) : new Response("boom", { status: 500 }),
     );
     await expect(ews().searchMessages("x", 10)).rejects.toThrow(/EWS 500/);
+  });
+});
+
+describe("EwsMailConnector folder names", () => {
+  const ews = () => new EwsMailConnector("user@example.com", async () => "token");
+  const xml = (body: string): Response => new Response(body, { status: 200 });
+
+  it("maps provider names such as iCloud's 'Sent Messages' onto sentitems", async () => {
+    const calls = recordFetch(() => xml(itemsFound([])));
+    await ews().searchMessages("x", 5, "Sent Messages");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.body).toContain('<t:DistinguishedFolderId Id="sentitems"/>');
+  });
+
+  it("looks up a custom folder by display name and searches its id", async () => {
+    const calls = recordFetch((_url, body) =>
+      body.includes("<m:FindFolder")
+        ? xml(folderListing([{ id: "f-proj", folderClass: "IPF.Note" }]))
+        : xml(itemsFound([])),
+    );
+    await ews().searchMessages("x", 5, "Projekte 2026");
+    expect(calls[0]?.body).toContain('<t:Constant Value="Projekte 2026"/>');
+    expect(calls[1]?.body).toContain('<t:FolderId Id="f-proj"/>');
+  });
+
+  it("narrows a search to nothing for a folder the mailbox lacks, but fails list and move", async () => {
+    recordFetch(() => xml(folderListing([])));
+    await expect(ews().searchMessages("x", 5, "Nicht da")).resolves.toEqual([]);
+    await expect(ews().listMessages("Nicht da")).rejects.toThrow(/"Nicht da" not found/);
+    await expect(ews().moveMessage("i1", "Nicht da")).rejects.toThrow(/not found/);
   });
 });
 

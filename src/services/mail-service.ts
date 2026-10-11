@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { ConnectorRegistry } from "../connectors/index.js";
-import type { MailConnector, MailMessage, MailMessageFull, MailSendOpts } from "../types/index.js";
+import type {
+  MailConnector,
+  MailMessage,
+  MailMessageFull,
+  MailSendOpts,
+  SendReceipt,
+} from "../types/index.js";
 import { hasFolder } from "../utils/mail-folders.js";
 import { resolveAttachmentPaths } from "../utils/outgoing-attachments.js";
 import { assertNoHeaderInjection } from "../utils/security.js";
@@ -94,7 +100,7 @@ export class MailService {
   >();
   private readonly draftSubmissionIdempotency = new Map<
     string,
-    { promise: Promise<void>; createdAt: number }
+    { promise: Promise<string | undefined>; createdAt: number }
   >();
   /** Pinned bulk previews, keyed by the token handed back to the caller. */
   private readonly bulkPreviews = new Map<
@@ -154,15 +160,26 @@ export class MailService {
         : "";
       return this.withSignature(connector, input.signature !== false, async () => {
         if (input.replyTo) {
-          await connector.replyToMessage(input.replyTo, input.body, options);
-          return `✅ Reply sent from ${connector.account}${attachmentNote}`;
+          const receipt = await connector.replyToMessage(input.replyTo, input.body, options);
+          return withWarning(`✅ Reply sent from ${connector.account}${attachmentNote}`, receipt);
         }
         if (input.forwardId) {
-          await connector.forwardMessage(input.forwardId, to, input.body, options);
-          return `✅ Forwarded from ${connector.account} to ${input.to}${attachmentNote}`;
+          const receipt = await connector.forwardMessage(input.forwardId, to, input.body, options);
+          return withWarning(
+            `✅ Forwarded from ${connector.account} to ${input.to}${attachmentNote}`,
+            receipt,
+          );
         }
-        await connector.sendMessage(to, input.subject ?? "(no subject)", input.body, options);
-        return `✅ Sent from ${connector.account} to ${input.to}${attachmentNote}`;
+        const receipt = await connector.sendMessage(
+          to,
+          input.subject ?? "(no subject)",
+          input.body,
+          options,
+        );
+        return withWarning(
+          `✅ Sent from ${connector.account} to ${input.to}${attachmentNote}`,
+          receipt,
+        );
       });
     };
     if (!input.idempotencyKey) return operation();
@@ -206,12 +223,12 @@ export class MailService {
     account: string,
     role?: string,
     idempotencyKey?: string,
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     const connector = this.registry.getMailConnectorForAccount(account, role, "write");
     if (!connector?.sendDraft)
       throw new Error(`sendDraft not supported for ${connector?.tier ?? account}`);
     const sendDraft = connector.sendDraft.bind(connector);
-    const submit = async (): Promise<void> => sendDraft(id);
+    const submit = async (): Promise<string | undefined> => (await sendDraft(id)).warning;
     if (!idempotencyKey) return submit();
     this.pruneIdempotency();
     const scopedKey = `${account}\u0000${id}\u0000${idempotencyKey}`;
@@ -220,7 +237,7 @@ export class MailService {
     const pending = submit();
     this.draftSubmissionIdempotency.set(scopedKey, { promise: pending, createdAt: Date.now() });
     try {
-      await pending;
+      return await pending;
     } catch (error) {
       this.draftSubmissionIdempotency.delete(scopedKey);
       throw error;
@@ -445,4 +462,9 @@ export class MailService {
         this.draftSubmissionIdempotency.delete(key);
     }
   }
+}
+
+/** Appends a connector's post-delivery warning to a success line. */
+function withWarning(line: string, receipt: SendReceipt): string {
+  return receipt.warning ? `${line}\n⚠️ ${receipt.warning}` : line;
 }
