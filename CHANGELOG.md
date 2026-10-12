@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/metaneutrons/eule-mcp/compare/v0.8.1...v0.9.0) (2026-10-12)
+
+
+### Features
+
+* ship Eule as a Claude Desktop extension (eule-mcp.mcpb) ([#100](https://github.com/metaneutrons/eule-mcp/issues/100)) ([4fea6a9](https://github.com/metaneutrons/eule-mcp/commit/4fea6a9e0adc68a4c3475ee2a7ed0471ff6430d5))
+
 ## [0.8.1](https://github.com/metaneutrons/eule-mcp/compare/v0.8.0...v0.8.1) (2026-10-11)
 
 
