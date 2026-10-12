@@ -1,0 +1,37 @@
+{
+  "manifest_version": "0.3",
+  "name": "eule-mcp",
+  "display_name": "eule-mcp",
+  "version": "0.8.1",
+  "description": "Office assistant: e-mail, calendar, tasks, contacts and documents across M365, Google, IMAP/SMTP, CalDAV/CardDAV and Paperless.",
+  "long_description": "Eule connects Claude to your mail, calendar, tasks, contacts and documents. Configuration and the local database live in ~/.eule; secrets stay in the OS credential store. The bundle ships the platform-native eule-helper used for webview logins and secret prompts.",
+  "author": {
+    "name": "metaneutrons",
+    "url": "https://github.com/metaneutrons"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/metaneutrons/eule-mcp.git"
+  },
+  "homepage": "https://github.com/metaneutrons/eule-mcp#readme",
+  "documentation": "https://github.com/metaneutrons/eule-mcp#readme",
+  "support": "https://github.com/metaneutrons/eule-mcp/issues",
+  "icon": "icon.png",
+  "license": "GPL-3.0-or-later",
+  "keywords": ["mcp", "office", "m365", "outlook", "gtd", "tasks", "calendar", "email"],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/server/index.js"]
+    }
+  },
+  "tools_generated": true,
+  "compatibility": {
+    "platforms": ["darwin", "linux", "win32"],
+    "runtimes": {
+      "node": ">=24"
+    }
+  }
+}

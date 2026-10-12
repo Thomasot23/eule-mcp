@@ -7,6 +7,7 @@ import {
   REDIRECT_URI,
 } from "../providers/m365/index.js";
 import { oauthCapture, oauthSafari } from "../helper/run.js";
+import { cachedHelperPath, localHelperPath } from "../helper/download.js";
 import { createInterface } from "node:readline/promises";
 import { nativeCredentialBroker } from "../helper/credential-store.js";
 import { ConfiguredCredentialResolver } from "../helper/configured-credential-resolver.js";
@@ -367,6 +368,18 @@ async function main(): Promise<void> {
     case "serve":
       await import("../server/index.js");
       break;
+    case "helper-path": {
+      const local = localHelperPath();
+      if (local) {
+        console.log(local);
+      } else {
+        console.error(
+          `No local eule-helper; it is downloaded on first use to ${cachedHelperPath()}`,
+        );
+        process.exitCode = 1;
+      }
+      break;
+    }
     default:
       console.log("Eule MCP — Kiro Office Agent 🦉\n");
       console.log("Usage:");
@@ -393,6 +406,7 @@ async function main(): Promise<void> {
       );
       console.log("       add --remove to delete either stored auto-auth credential");
       console.log("  eule-mcp serve                        Start MCP server (stdio)");
+      console.log("  eule-mcp helper-path                  Print the local eule-helper in use");
       console.log("  eule-mcp help                         Show this help");
   }
 }

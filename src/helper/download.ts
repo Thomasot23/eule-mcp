@@ -71,9 +71,26 @@ export interface LocalHelperOptions {
   readonly override?: string | null;
   readonly packageRoot?: string;
   readonly platform?: NodeJS.Platform;
+  readonly arch?: string;
 }
 
-/** Resolve an explicitly trusted helper or a Cargo build from this source checkout. */
+/**
+ * Directory of this platform's helper inside a Claude Desktop extension bundle,
+ * named after its release asset: `bin/darwin-universal/`, `bin/linux-x64/`, …
+ */
+export function bundledHelperDir(
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): string {
+  return assetName(platform, arch)
+    .replace(/^eule-helper-/, "")
+    .replace(/\.exe$/, "");
+}
+
+/**
+ * Resolve an explicitly trusted helper, a Cargo build from this source checkout,
+ * or the helper shipped for this platform inside a Claude Desktop extension.
+ */
 export function localHelperPath(options: LocalHelperOptions = {}): string | undefined {
   const platform = options.platform ?? process.platform;
   const override =
@@ -87,6 +104,19 @@ export function localHelperPath(options: LocalHelperOptions = {}): string | unde
     const candidate = join(root, "helper", "target", profile, name);
     if (existsSync(candidate))
       return assertRunnable(candidate, platform, `Local ${profile} helper`);
+  }
+
+  let bundleDir: string;
+  try {
+    bundleDir = bundledHelperDir(platform, options.arch ?? process.arch);
+  } catch {
+    return undefined;
+  }
+  const bundled = join(root, "bin", bundleDir, name);
+  if (existsSync(bundled)) {
+    // An extension installer may drop the executable bit when unpacking.
+    if (platform !== "win32" && (statSync(bundled).mode & 0o111) === 0) chmodSync(bundled, 0o755);
+    return assertRunnable(bundled, platform, "Bundled helper");
   }
   return undefined;
 }

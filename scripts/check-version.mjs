@@ -11,6 +11,7 @@ function capturedVersion(path, pattern) {
 
 const versions = new Map([
   ["package.json", packageVersion],
+  ["manifest.json", JSON.parse(readFileSync("manifest.json", "utf8")).version],
   [
     "helper/Cargo.toml",
     capturedVersion(

@@ -43,6 +43,8 @@
     "format": "prettier --write 'src/**/*.ts'",
     "format:check": "prettier --check 'src/**/*.ts'",
     "version:check": "node scripts/check-version.mjs",
+    "mcpb:pack": "node scripts/pack-mcpb.mjs",
+    "mcpb:verify": "node scripts/verify-mcpb.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -75,6 +77,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@anthropic-ai/mcpb": "2.1.2",
     "@eslint/js": "^10.0.1",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.4",

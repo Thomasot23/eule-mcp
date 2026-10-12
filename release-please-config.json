@@ -11,6 +11,7 @@
       "bump-minor-pre-major": true,
       "extra-files": [
         { "type": "generic", "path": "helper/Cargo.toml" },
+        { "type": "json", "path": "manifest.json", "jsonpath": "$.version" },
         {
           "type": "toml",
           "path": "helper/Cargo.lock",

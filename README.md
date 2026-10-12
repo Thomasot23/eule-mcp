@@ -284,7 +284,30 @@ Backends:
   `login --capture`): a desktop session (the `eule-helper` GUI is fetched on
   first use — no manual install)
 
-### Install
+### Claude Desktop
+
+Eule ships as a Claude Desktop extension. One file covers macOS, Windows and
+Linux and already contains the `eule-helper` login window for each of them.
+
+1. Download `eule-mcp.mcpb` from the
+   [latest release](https://github.com/metaneutrons/eule-mcp/releases/latest/download/eule-mcp.mcpb).
+2. Double-click it, or drag it onto Claude Desktop's **Settings → Extensions**
+   page, and confirm **Install**.
+3. Ask Claude to set up an account, or run the setup steps below.
+
+Claude Desktop runs the extension with its built-in Node.js, so nothing else
+needs to be installed. Configuration, the local database and tokens live in
+`~/.eule`, exactly as with a source install, so switching between the two keeps
+your setup. Updates arrive by installing the newer `eule-mcp.mcpb` over the old
+one.
+
+The tools appear as `mcp__eule-mcp__*`: Claude Desktop derives the prefix from
+the extension's display name, which is therefore `eule-mcp`. If you previously
+registered Eule under `mcpServers` in `claude_desktop_config.json`, remove that
+entry so the tools are not listed twice. To verify a download:
+`shasum -a 256 -c eule-mcp.mcpb.sha256`.
+
+### Install from source
 
 ```bash
 git clone https://github.com/metaneutrons/eule-mcp.git
@@ -395,8 +418,12 @@ release. Eule uses the first available source in this order:
 
 1. An absolute, explicitly trusted `EULE_HELPER_PATH`.
 2. `helper/target/release/eule-helper` (then `debug`) in a source checkout.
-3. The GitHub release matching the installed Eule version, checksum-verified
+3. The helper for this platform inside the Claude Desktop extension
+   (`bin/<platform>-<arch>/`, macOS: `bin/darwin-universal/`).
+4. The GitHub release matching the installed Eule version, checksum-verified
    and cached `0700` in `~/.eule/bin/`.
+
+`eule-mcp helper-path` prints which local helper Eule uses.
 
 For example, before the first release exists:
 
@@ -521,7 +548,9 @@ them between machines; use `connector_configure`, `credential_rotate`, and
 kiro-cli mcp add --name eule --command node --args "/path/to/eule-mcp/dist/server/index.js"
 ```
 
-**Claude Desktop / Cursor** — add to your MCP config:
+**Claude Desktop:** install the extension, see [Claude Desktop](#claude-desktop).
+
+**Cursor**, or Claude Desktop from a source checkout — add to your MCP config:
 
 ```json
 {
@@ -702,7 +731,20 @@ not edit versions or create release tags manually. Release Please watches
 Conventional Commits on `main` and maintains a release PR containing the SemVer
 bump, `CHANGELOG.md`, Rust helper metadata, and lockfile updates. Merging that
 PR creates the `v<version>` GitHub release and builds checksum-protected helper
-binaries for every supported platform.
+binaries for every supported platform. From those signed binaries the release
+then packs `eule-mcp.mcpb` (`scripts/pack-mcpb.mjs`), starts it on each of the
+five platforms (`scripts/verify-mcpb.mjs`), and only then attaches it with its
+`.sha256` and a provenance attestation.
+
+To pack the extension locally, put release helpers named like the release
+assets (`eule-helper-darwin-universal`, …) into a directory; missing platforms
+are skipped:
+
+```bash
+pnpm run build
+pnpm mcpb:pack --helpers <dir> --out release-mcpb
+pnpm mcpb:verify release-mcpb/eule-mcp.mcpb
+```
 
 Release publication is gated by the `release` environment. It requires the
 Release Please GitHub App credentials and complete Apple signing/notarization

@@ -75,6 +75,21 @@ jobs:
         working-directory: helper
       - run: cargo build --locked --release
         working-directory: helper
+      # Dry run of the release's Claude Desktop extension with this helper, so
+      # packing problems show up before a release.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.x
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm run build
+      - name: Pack and smoke-test the extension with this helper
+        run: |
+          mkdir -p ci-helpers
+          cp helper/target/release/eule-helper ci-helpers/eule-helper-linux-x64
+          node scripts/pack-mcpb.mjs --helpers ci-helpers --out release-mcpb
+          node scripts/verify-mcpb.mjs release-mcpb/eule-mcp.mcpb
       - name: Audit Rust dependencies
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
