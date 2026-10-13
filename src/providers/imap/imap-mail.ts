@@ -67,6 +67,59 @@ function walkAttachments(node: BodyStructureNode | undefined, out: MailAttachmen
   for (const child of node.childNodes ?? []) walkAttachments(child, out);
 }
 
+/** Collect a streamed IMAP part, capped as bytes arrive (no Content-Length). */
+async function readCapped(stream: AsyncIterable<unknown>, what: string): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of stream) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+    total += buf.length;
+    if (total > MAX_RESPONSE_BYTES)
+      throw new Error(`${what} exceeds the ${String(MAX_RESPONSE_BYTES)}-byte limit.`);
+    chunks.push(buf);
+  }
+  return Buffer.concat(chunks);
+}
+
+/** The part a reader wants to see: HTML over plain text, never an attachment. */
+export function pickBodyPart(
+  root: BodyStructureNode | undefined,
+): { part: string; bodyType: "html" | "text" } | undefined {
+  let html: string | undefined;
+  let text: string | undefined;
+  const visit = (node: BodyStructureNode): void => {
+    const type = node.type?.toLowerCase();
+    const disposition = node.disposition?.toLowerCase();
+    const filename = node.dispositionParameters?.filename ?? node.parameters?.name;
+    const isAttachment = disposition === "attachment" || !!filename;
+    // A forwarded message/rfc822 has its own body; the outer one comes first.
+    if (type === "message/rfc822") return;
+    if (!isAttachment && !node.childNodes?.length) {
+      // A single-part message has no part number; IMAP calls its body "1".
+      const part = node.part ?? "1";
+      if (type === "text/html") html ??= part;
+      else if (type === "text/plain" || !type) text ??= part;
+    }
+    for (const child of node.childNodes ?? []) visit(child);
+  };
+  if (root) visit(root);
+  if (html) return { part: html, bodyType: "html" };
+  if (text) return { part: text, bodyType: "text" };
+  return undefined;
+}
+
+/** Plain-text preview of a body for list views. */
+function snippetOf(body: string, bodyType: "html" | "text"): string {
+  const text =
+    bodyType === "html"
+      ? body
+          .replace(/<(style|script)[\s\S]*?<\/\1>/gi, " ")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/&nbsp;/g, " ")
+      : body;
+  return text.replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
 /**
  * IMAP UIDs are only unique within one mailbox, so a message id carries its
  * mailbox: `<encoded mailbox>/<uid>`. Encoding keeps a hierarchy delimiter in
@@ -418,19 +471,12 @@ export class ImapMailConnector implements MailConnector {
       try {
         const raw = await client.fetchOne(
           String(uid),
-          {
-            envelope: true,
-            flags: true,
-            source: true,
-            bodyStructure: true,
-            headers: ["references"],
-          },
+          { envelope: true, flags: true, bodyStructure: true, headers: ["references"] },
           { uid: true },
         );
         if (!raw) throw new Error(`Message ${id} not found`);
         const msg = raw as {
           uid: number;
-          source?: Buffer;
           headers?: Buffer;
           bodyStructure?: BodyStructureNode;
           envelope?: {
@@ -443,9 +489,22 @@ export class ImapMailConnector implements MailConnector {
           };
           flags?: Set<string>;
         };
-        const body = msg.source?.toString() ?? "";
-        const bodyStart = body.indexOf("\r\n\r\n");
-        const textBody = bodyStart >= 0 ? body.slice(bodyStart + 4) : "";
+        // Read the displayable part decoded (transfer encoding and charset);
+        // the raw source is only the fallback for a structure without one.
+        const picked = pickBodyPart(msg.bodyStructure);
+        let textBody: string;
+        let bodyType: "html" | "text" = "text";
+        if (picked) {
+          const part = await client.download(String(uid), picked.part, { uid: true });
+          textBody = (await readCapped(part.content, "Message body")).toString("utf8");
+          bodyType = picked.bodyType;
+        } else {
+          const full = (await client.fetchOne(String(uid), { source: true }, { uid: true })) as
+            { source?: Buffer } | false;
+          const source = (full ? full.source?.toString() : undefined) ?? "";
+          const bodyStart = source.indexOf("\r\n\r\n");
+          textBody = bodyStart >= 0 ? source.slice(bodyStart + 4) : "";
+        }
 
         const attachments: MailAttachment[] = [];
         walkAttachments(msg.bodyStructure, attachments);
@@ -458,10 +517,10 @@ export class ImapMailConnector implements MailConnector {
             from: msg.envelope?.from?.[0]?.address ?? "",
             to: (msg.envelope?.to ?? []).map((a) => a.address ?? ""),
             receivedAt: msg.envelope?.date?.toISOString() ?? "",
-            snippet: textBody.slice(0, 200),
+            snippet: snippetOf(textBody, bodyType),
             isRead: msg.flags?.has("\\Seen") ?? false,
             body: textBody,
-            bodyType: "text",
+            bodyType,
             attachments,
           },
           thread: {
@@ -485,18 +544,7 @@ export class ImapMailConnector implements MailConnector {
       const lock = await client.getMailboxLock(mailbox);
       try {
         const part = await client.download(String(uid), attachmentId, { uid: true });
-        const chunks: Buffer[] = [];
-        let total = 0;
-        for await (const chunk of part.content) {
-          const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
-          total += buf.length;
-          // No Content-Length on a streamed IMAP part — cap as bytes arrive.
-          if (total > MAX_RESPONSE_BYTES) {
-            throw new Error(`Attachment exceeds the ${String(MAX_RESPONSE_BYTES)}-byte limit.`);
-          }
-          chunks.push(buf);
-        }
-        return Buffer.concat(chunks);
+        return await readCapped(part.content, "Attachment");
       } finally {
         lock.release();
       }
