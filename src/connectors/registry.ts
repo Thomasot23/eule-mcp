@@ -80,6 +80,7 @@ export class ConnectorRegistry {
               port: mc.port,
               smtpPort: mc.smtpPort,
               saveSentCopy: mc.saveSentCopy,
+              sentMailbox: mc.sentMailbox,
               auth: mc.auth ?? "password",
               password: this.secrets.connector(mc),
             }),
@@ -174,6 +175,7 @@ export class ConnectorRegistry {
         port: mc.port,
         smtpPort: mc.smtpPort,
         saveSentCopy: mc.saveSentCopy,
+        sentMailbox: mc.sentMailbox,
         auth: mc.auth ?? "password",
         password: this.secrets.connector(mc),
       });

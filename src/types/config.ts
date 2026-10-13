@@ -16,6 +16,11 @@ export interface ConnectorConfig {
    * except for SMTP services that do this themselves (Gmail, Microsoft).
    */
   readonly saveSentCopy?: boolean;
+  /**
+   * IMAP mailbox that holds sent mail. Only needed where the server flags no
+   * Sent mailbox, or flags one that the mail client does not use.
+   */
+  readonly sentMailbox?: string;
   readonly auth?: "oauth" | "password";
   readonly password?: string;
   /** Opaque key in the OS credential store. Preferred over inline secrets. */

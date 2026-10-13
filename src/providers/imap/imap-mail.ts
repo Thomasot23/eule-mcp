@@ -154,8 +154,10 @@ export function replyThreadHeaders(parent: ThreadSource): {
   };
 }
 
+type SpecialUse = "\\Sent" | "\\Drafts" | "\\Trash" | "\\Archive" | "\\Junk";
+
 /** Special-use flags (RFC 6154) of the well-known folders. */
-const SPECIAL_USE: Partial<Record<WellKnownMailFolder, string>> = {
+const SPECIAL_USE: Partial<Record<WellKnownMailFolder, SpecialUse>> = {
   archive: "\\Archive",
   sentitems: "\\Sent",
   drafts: "\\Drafts",
@@ -163,11 +165,80 @@ const SPECIAL_USE: Partial<Record<WellKnownMailFolder, string>> = {
   junkemail: "\\Junk",
 };
 
-/** Mailbox names tried when a server announces no special-use flag for them. */
-const FALLBACK_MAILBOXES: Readonly<Record<"\\Sent" | "\\Drafts", readonly string[]>> = {
-  "\\Sent": ["Sent Messages", "Sent", "Sent Items", "Gesendet", "Gesendete Objekte"],
-  "\\Drafts": ["Drafts", "Entwürfe"],
+/** Mailbox appended to when a server has no Sent or Drafts mailbox at all. */
+const DEFAULT_MAILBOX: Readonly<Record<"\\Sent" | "\\Drafts", string>> = {
+  "\\Sent": "Sent Messages",
+  "\\Drafts": "Drafts",
 };
+
+/** The subset of an imapflow LIST entry that mailbox resolution reads. */
+interface ListedMailbox {
+  path: string;
+  delimiter?: string;
+  flags: Set<string>;
+  specialUse?: string;
+}
+
+/**
+ * True for a top-level mailbox (or one directly below INBOX, as on Courier)
+ * whose name is a common name for this special use ("Sent", "Gesendet",
+ * "Sent Messages"). Names nested deeper belong to the user's own folders.
+ */
+function namedFor(box: ListedMailbox, use: SpecialUse): boolean {
+  const parts = box.delimiter ? box.path.split(box.delimiter) : [box.path];
+  const topLevel =
+    parts.length === 1 || (parts.length === 2 && parts[0]?.toUpperCase() === "INBOX");
+  const known = wellKnownMailFolder(parts[parts.length - 1] ?? "");
+  return topLevel && known !== undefined && SPECIAL_USE[known] === use;
+}
+
+/**
+ * The mailbox for a special use, or undefined when the server has none.
+ *
+ * A special-use attribute the server sends in its LIST response decides. This
+ * holds even where the server does not advertise SPECIAL-USE: iCloud flags
+ * "Sent Messages" as \Sent without it, and imapflow then falls back to
+ * guessing by name, where an empty "Gesendete Elemente" sorts first.
+ *
+ * Without an attribute, every mailbox with a common name for the use is a
+ * candidate, imapflow's own guess included. Where several exist, the one
+ * holding the most messages wins, because that is the one a mail client has
+ * been using; a stray empty folder of the same kind never does.
+ */
+async function findSpecialMailbox(
+  client: ImapFlow,
+  mailboxes: readonly ListedMailbox[],
+  use: SpecialUse,
+): Promise<string | undefined> {
+  const usable = mailboxes.filter(
+    (box) => !box.flags.has("\\Noselect") && !box.flags.has("\\NonExistent"),
+  );
+  const declared = usable.filter((box) => box.flags.has(use));
+  const candidates =
+    declared.length > 0
+      ? declared
+      : usable.filter((box) => box.specialUse === use || namedFor(box, use));
+  if (candidates.length <= 1) return candidates[0]?.path;
+  // imapflow's pick first, so it wins a tie.
+  const ordered = [...candidates].sort(
+    (a, b) => Number(b.specialUse === use) - Number(a.specialUse === use),
+  );
+  let best = { path: ordered[0]?.path, messages: -1 };
+  for (const box of ordered) {
+    const messages = await messageCount(client, box.path);
+    if (messages > best.messages) best = { path: box.path, messages };
+  }
+  return best.path;
+}
+
+/** Number of messages in a mailbox, or -1 if the server will not say. */
+async function messageCount(client: ImapFlow, path: string): Promise<number> {
+  try {
+    return (await client.status(path, { messages: true })).messages ?? -1;
+  } catch {
+    return -1;
+  }
+}
 
 /**
  * SMTP services that file every submitted message in Sent themselves. A copy
@@ -186,6 +257,8 @@ export interface ImapConfig {
    * except for SMTP services that file sent mail themselves (Gmail, Microsoft).
    */
   saveSentCopy?: boolean;
+  /** Mailbox for sent mail, overriding the one the server flags. */
+  sentMailbox?: string;
   auth: "oauth" | "password";
   getToken?: () => Promise<string | null>;
   password?: string;
@@ -250,37 +323,39 @@ export class ImapMailConnector implements MailConnector {
   }
 
   /**
-   * Mailbox path for a folder name. Well-known names ("Archiv", "Sent Items",
-   * "Papierkorb") resolve through the server's special-use flags, so the same
+   * Mailbox path for a folder name. A mailbox that exists under exactly this
+   * path is taken as it is. Otherwise well-known names ("Archiv", "Sent Items",
+   * "Papierkorb") resolve to the server's mailbox for that use, so the same
    * name works on every provider; any other name is taken as the path.
    */
   private async resolveMailbox(client: ImapFlow, folder: string): Promise<string> {
+    if (folder.toUpperCase() === "INBOX") return "INBOX";
     const known = wellKnownMailFolder(folder);
-    if (known === "inbox") return "INBOX";
-    const specialUse = known && SPECIAL_USE[known];
-    if (!specialUse) return folder;
+    if (!known) return folder;
     const mailboxes = await client.list();
-    return mailboxes.find((box) => box.specialUse === specialUse)?.path ?? folder;
+    if (mailboxes.some((box) => box.path === folder)) return folder;
+    if (known === "inbox") return "INBOX";
+    const specialUse = SPECIAL_USE[known];
+    if (!specialUse) return folder;
+    return (await this.mailboxFor(client, mailboxes, specialUse)) ?? folder;
+  }
+
+  /** {@link findSpecialMailbox}, except that a configured Sent mailbox wins. */
+  private async mailboxFor(
+    client: ImapFlow,
+    mailboxes: readonly ListedMailbox[],
+    use: SpecialUse,
+  ): Promise<string | undefined> {
+    if (use === "\\Sent" && this.cfg.sentMailbox) return this.cfg.sentMailbox;
+    return findSpecialMailbox(client, mailboxes, use);
   }
 
   /**
-   * Mailbox carrying a special-use flag (`\\Sent`, `\\Drafts`). Servers name these
-   * differently (iCloud "Sent Messages", Dovecot "Sent"), so the flag decides;
-   * without one, the first existing mailbox with a common name wins.
+   * Mailbox to append sent mail or drafts to. Servers name these differently
+   * (iCloud "Sent Messages", Dovecot "Sent"); see {@link findSpecialMailbox}.
    */
   private async specialMailbox(client: ImapFlow, use: "\\Sent" | "\\Drafts"): Promise<string> {
-    const mailboxes = await client.list();
-    const flagged = mailboxes.find((box) => box.specialUse === use);
-    if (flagged) return flagged.path;
-    const candidates = FALLBACK_MAILBOXES[use];
-    const byName = candidates.find((name) =>
-      mailboxes.some((box) => box.path.toLowerCase() === name.toLowerCase()),
-    );
-    const fallback = byName ?? candidates[0];
-    if (!fallback) throw new Error(`No ${use} mailbox`);
-    return (
-      mailboxes.find((box) => box.path.toLowerCase() === fallback.toLowerCase())?.path ?? fallback
-    );
+    return (await this.mailboxFor(client, await client.list(), use)) ?? DEFAULT_MAILBOX[use];
   }
 
   /**
@@ -310,6 +385,9 @@ export class ImapMailConnector implements MailConnector {
         const messages: MailMessage[] = [];
         const mailbox = client.mailbox;
         const total = mailbox && typeof mailbox === "object" ? mailbox.exists : 0;
+        // "1:*" on an empty mailbox is an error on some servers (iCloud: NO
+        // "Invalid message number"), so there is nothing to fetch.
+        if (total === 0) return messages;
         const from = Math.max(1, total - limit + 1);
 
         for await (const raw of client.fetch(`${String(from)}:*`, {
@@ -771,23 +849,11 @@ export class ImapMailConnector implements MailConnector {
   }
 
   /**
-   * Resolves the mailbox that acts as the trash, preferring the server's
-   * declared `\Trash` special-use folder and falling back to the names in
-   * common use. Returns undefined when the server offers no trash at all.
+   * The mailbox that acts as the trash (see {@link findSpecialMailbox}), or
+   * undefined when the server offers none at all.
    */
   private async trashMailbox(client: ImapFlow): Promise<string | undefined> {
-    const mailboxes = await client.list();
-    const special = mailboxes.find((box) => box.specialUse === "\\Trash");
-    if (special) return special.path;
-    const candidates = new Set([
-      "trash",
-      "deleted messages",
-      "deleted items",
-      "inbox.trash",
-      "papierkorb",
-      "gelöschte elemente",
-    ]);
-    return mailboxes.find((box) => candidates.has(box.path.toLowerCase()))?.path;
+    return findSpecialMailbox(client, await client.list(), "\\Trash");
   }
 
   async deleteMessage(id: string): Promise<void> {

@@ -23,6 +23,12 @@ const connectorInputSchema = {
     .boolean()
     .optional()
     .describe("IMAP: file sent mail in the Sent folder (default true; off for Gmail/Microsoft)"),
+  sentMailbox: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe("IMAP: mailbox path for sent mail, if the server does not flag the right one"),
   url: z.url().optional(),
   signalCliUrl: z.url().optional(),
 } as const;

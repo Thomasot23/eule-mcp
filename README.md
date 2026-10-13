@@ -531,10 +531,16 @@ roles:
           credentialRef: "connector/personal/documents/paperless.a1b2c3d4"
 ```
 
-IMAP connectors file a copy of every sent message in the server's Sent folder
-(found by its special-use flag, e.g. iCloud's "Sent Messages"), because plain
-SMTP submission does not. Gmail and Microsoft file sent mail themselves, so the
-copy is skipped there; `saveSentCopy: true|false` overrides the default.
+IMAP connectors file a copy of every sent message in the server's Sent folder,
+because plain SMTP submission does not. Gmail and Microsoft file sent mail
+themselves, so the copy is skipped there; `saveSentCopy: true|false` overrides
+the default. The Sent folder is the one the server flags as `\Sent` (iCloud:
+"Sent Messages"). Without a flag, the folder with a common Sent name that holds
+the most mail is used. `sentMailbox: "<path>"` names the folder explicitly.
+
+Folder names passed to the mail tools are taken literally when the account has a
+folder of exactly that name. Otherwise well-known names such as "Sent",
+"Gesendet" or "Papierkorb" resolve to the server's folder for that purpose.
 
 Opaque references are generated and maintained by Eule. Do not invent or copy
 them between machines; use `connector_configure`, `credential_rotate`, and

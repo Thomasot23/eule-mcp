@@ -65,10 +65,17 @@ function connectorWith(client: unknown): ImapMailConnector {
   return connector;
 }
 
+/** A LIST response as imapflow returns it: raw attributes as a Set. */
+type Listing = { path: string; delimiter?: string; specialUse?: string; flags?: string[] }[];
+function listed(mailboxes: Listing) {
+  return mailboxes.map((box) => ({ ...box, flags: new Set(box.flags ?? []) }));
+}
+
 describe("ImapMailConnector delete", () => {
-  function client(mailboxes: { path: string; specialUse?: string }[]) {
+  function client(mailboxes: Listing) {
     return {
-      list: vi.fn(async () => mailboxes),
+      list: vi.fn(async () => listed(mailboxes)),
+      status: vi.fn(async () => ({ messages: 0 })),
       getMailboxLock: vi.fn(async () => ({ release: vi.fn() })),
       messageMove: vi.fn(async () => undefined),
       messageFlagsAdd: vi.fn(async () => undefined),
@@ -91,7 +98,10 @@ describe("ImapMailConnector delete", () => {
   });
 
   it("prefers the special-use folder over a same-named conventional one", async () => {
-    const c = client([{ path: "Trash" }, { path: "Papierkorb", specialUse: "\\Trash" }]);
+    const c = client([
+      { path: "Trash" },
+      { path: "Papierkorb", specialUse: "\\Trash", flags: ["\\Trash"] },
+    ]);
     await connectorWith(c).deleteMessage("42");
     expect(c.messageMove).toHaveBeenCalledWith("42", "Papierkorb", { uid: true });
   });
@@ -161,14 +171,13 @@ describe("IMAP message ids", () => {
 /** A fake IMAP account: mailbox path → messages, with per-mailbox locks. */
 function account(
   boxes: Record<string, { uid: number; subject: string; date: string }[]>,
-  listing: { path: string; specialUse?: string; flags?: string[] }[] = Object.keys(boxes).map(
-    (path) => ({ path }),
-  ),
+  listing: Listing = Object.keys(boxes).map((path) => ({ path })),
 ) {
   let open = "";
   const locked: string[] = [];
   const client = {
-    list: vi.fn(async () => listing.map((box) => ({ ...box, flags: new Set(box.flags ?? []) }))),
+    list: vi.fn(async () => listed(listing)),
+    status: vi.fn(async (path: string) => ({ messages: boxes[path]?.length ?? 0 })),
     getMailboxLock: vi.fn(async (path: string) => {
       if (!(path in boxes)) throw new Error(`Mailbox doesn't exist: ${path}`);
       open = path;
@@ -233,6 +242,35 @@ describe("ImapMailConnector search scope", () => {
     const messages = await connectorWith(client).searchMessages("mail", 10, "Gesendete Elemente");
     expect(locked).toEqual(["Sent Messages"]);
     expect(messages.map((m) => m.id)).toEqual(["Sent%20Messages/9"]);
+  });
+
+  it("takes a folder that exists under exactly the given name as it is", async () => {
+    const icloud = {
+      INBOX: [],
+      "Gesendete Elemente": [{ uid: 1, subject: "stray copy", date: "2026-10-12T22:28:00Z" }],
+      "Sent Messages": [{ uid: 9, subject: "sent mail", date: "2026-08-01T10:00:00Z" }],
+    };
+    const icloudListing = [
+      { path: "INBOX" },
+      { path: "Gesendete Elemente", specialUse: "\\Sent" },
+      { path: "Sent Messages", flags: ["\\Sent"] },
+    ];
+    for (const [folder, mailbox] of [
+      ["Gesendete Elemente", "Gesendete Elemente"],
+      ["Sent Messages", "Sent Messages"],
+      ["Sent", "Sent Messages"],
+      ["Gesendet", "Sent Messages"],
+    ]) {
+      const { client, locked } = account(icloud, icloudListing);
+      await connectorWith(client).listMessages(folder);
+      expect(locked, folder).toEqual([mailbox]);
+    }
+  });
+
+  it("lists an empty mailbox without fetching", async () => {
+    const { client } = account({ INBOX: [] });
+    expect(await connectorWith(client).listMessages("INBOX")).toEqual([]);
+    expect(client.fetch).not.toHaveBeenCalled();
   });
 
   it("searches only \\All, junk and trash where an \\All mailbox exists", async () => {
@@ -447,9 +485,10 @@ describe("ImapMailConnector reply threading", () => {
 });
 
 describe("ImapMailConnector Sent copy", () => {
-  function client(mailboxes: { path: string; specialUse?: string }[]) {
+  function client(mailboxes: Listing, counts: Record<string, number> = {}) {
     return {
-      list: vi.fn(async () => mailboxes),
+      list: vi.fn(async () => listed(mailboxes)),
+      status: vi.fn(async (path: string) => ({ messages: counts[path] ?? 0 })),
       append: vi.fn(async (_mailbox: string, _raw: Buffer, _flags: string[]) => ({ uid: 7 })),
       mailboxOpen: vi.fn(async () => undefined),
       fetchOne: vi.fn(async () => ({ source: Buffer.from("Subject: draft\r\n\r\nbody") })),
@@ -463,6 +502,7 @@ describe("ImapMailConnector Sent copy", () => {
     imap: unknown,
     smtpHost = "smtp.mail.me.com",
     saveSentCopy?: boolean,
+    sentMailbox?: string,
   ): { connector: ImapMailConnector; sendMail: ReturnType<typeof vi.fn> } {
     const connector = new ImapMailConnector("user@example.com", {
       account: "user@example.com",
@@ -471,6 +511,7 @@ describe("ImapMailConnector Sent copy", () => {
       auth: "password",
       password: "test",
       ...(saveSentCopy === undefined ? {} : { saveSentCopy }),
+      ...(sentMailbox === undefined ? {} : { sentMailbox }),
     });
     const sendMail = vi.fn(async () => ({}));
     Object.defineProperty(connector, "connect", { value: vi.fn(async () => imap) });
@@ -509,6 +550,48 @@ describe("ImapMailConnector Sent copy", () => {
     const { connector } = sending(imap);
     await connector.sendMessage(["to@example.com"], "Hi", "Body");
     expect(imap.append.mock.calls[0]?.[0]).toBe("Sent");
+  });
+
+  it("files in the mailbox iCloud flags as \\Sent, not in imapflow's guess by name", async () => {
+    // iCloud's LIST (13 Oct 2026): no SPECIAL-USE capability, but "Sent Messages"
+    // carries \Sent. imapflow ignores that attribute and guesses by name instead.
+    const imap = client([
+      { path: "INBOX" },
+      { path: "Gesendete Elemente", specialUse: "\\Sent" },
+      { path: "Sent Messages", flags: ["\\Sent"] },
+    ]);
+    const { connector } = sending(imap);
+    await connector.sendMessage(["to@example.com"], "Hi", "Body");
+    expect(imap.append.mock.calls[0]?.[0]).toBe("Sent Messages");
+    expect(imap.status).not.toHaveBeenCalled();
+  });
+
+  it("prefers the Sent mailbox that holds mail over an empty one with a Sent name", async () => {
+    const imap = client(
+      [
+        { path: "Gesendet", specialUse: "\\Sent" },
+        { path: "Sent" },
+        { path: "Projekte/Sent", delimiter: "/" },
+      ],
+      { Gesendet: 0, Sent: 120, "Projekte/Sent": 900 },
+    );
+    const { connector } = sending(imap);
+    await connector.sendMessage(["to@example.com"], "Hi", "Body");
+    expect(imap.append.mock.calls[0]?.[0]).toBe("Sent");
+  });
+
+  it("keeps imapflow's choice where the candidates hold the same number of messages", async () => {
+    const imap = client([{ path: "Sent" }, { path: "Gesendet", specialUse: "\\Sent" }]);
+    const { connector } = sending(imap);
+    await connector.sendMessage(["to@example.com"], "Hi", "Body");
+    expect(imap.append.mock.calls[0]?.[0]).toBe("Gesendet");
+  });
+
+  it("files in a configured sentMailbox even where the server flags another", async () => {
+    const imap = client([{ path: "Sent", flags: ["\\Sent"] }, { path: "Ausgang" }]);
+    const { connector } = sending(imap, "smtp.mail.me.com", undefined, "Ausgang");
+    await connector.sendMessage(["to@example.com"], "Hi", "Body");
+    expect(imap.append.mock.calls[0]?.[0]).toBe("Ausgang");
   });
 
   it("does not file a copy where the SMTP service does it itself", async () => {

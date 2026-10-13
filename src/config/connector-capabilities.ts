@@ -8,6 +8,7 @@ const CONFIGURABLE_FIELDS = [
   "smtpHost",
   "smtpPort",
   "saveSentCopy",
+  "sentMailbox",
   "url",
   "signalCliUrl",
 ] as const satisfies readonly (keyof ConnectorConfig)[];
@@ -48,7 +49,7 @@ export const CONNECTOR_CAPABILITIES: Readonly<
     kinds: ["mail"],
     credential: "password",
     requiredFields: ["host", "smtpHost"],
-    optionalFields: ["port", "smtpPort", "saveSentCopy"],
+    optionalFields: ["port", "smtpPort", "saveSentCopy", "sentMailbox"],
   },
   caldav: {
     // "tasks" is VTODO over the same collection set (Apple Reminders,

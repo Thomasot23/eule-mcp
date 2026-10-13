@@ -176,6 +176,23 @@ describe("ConfigurationControlService", () => {
     ).toBe("secret");
   });
 
+  it("stores the IMAP Sent mailbox options", async () => {
+    const context = harness();
+    await context.service.configureConnector({
+      role: "personal",
+      kind: "mail",
+      type: "imap",
+      account: "user@example.com",
+      id: "icloud",
+      host: "imap.example.com",
+      smtpHost: "smtp.example.com",
+      saveSentCopy: true,
+      sentMailbox: "Sent Messages",
+    });
+    const connector = context.getConfig().roles[0]?.connectors.mail?.[0];
+    expect(connector).toMatchObject({ saveSentCopy: true, sentMailbox: "Sent Messages" });
+  });
+
   it("rejects invalid connector/domain combinations before prompting", async () => {
     const context = harness();
     await expect(

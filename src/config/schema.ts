@@ -56,6 +56,7 @@ export const connectorSchema = z
     smtpHost: z.string().trim().min(1).optional(),
     smtpPort: z.number().int().min(1).max(65535).optional(),
     saveSentCopy: z.boolean().optional(),
+    sentMailbox: z.string().trim().min(1).optional(),
     auth: z.enum(["oauth", "password"]).optional(),
     password: z.string().optional(),
     credentialRef: z.string().regex(CONNECTOR_CREDENTIAL_REF_PATTERN).optional(),
