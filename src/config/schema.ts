@@ -172,6 +172,13 @@ export const appConfigSchema = z
           }),
       )
       .optional(),
+    updates: z
+      .object({
+        /** Check GitHub for a newer release at most once a day (default true). */
+        check: z.boolean().default(true),
+      })
+      .strict()
+      .optional(),
     roles: z.array(roleSchema).default([]),
   })
   .strict()

@@ -14,6 +14,8 @@ import {
   AttachmentService,
   AuthService,
   TaskService,
+  UpdateService,
+  updateNotice,
 } from "../services/index.js";
 import { registerAuthTools } from "../tools/auth-tools.js";
 import { registerConfigTools } from "../tools/config-tools.js";
@@ -25,6 +27,7 @@ import { registerFileTools } from "../tools/file-tools.js";
 import { registerMailTools } from "../tools/mail-tools.js";
 import { registerMessengerTools } from "../tools/messenger-tools.js";
 import { registerTaskTools } from "../tools/task-tools.js";
+import { registerUpdateTools } from "../tools/update-tools.js";
 import { ConnectorRegistry } from "../connectors/index.js";
 import { tokenRepository } from "../auth/token-repository.js";
 import { M365Reauth } from "../auth/m365-reauth.js";
@@ -51,7 +54,13 @@ const server = new McpServer({
   version: EULE_VERSION,
 });
 
-registerAuthTools(server, authService);
+// MCP Bundles cannot update themselves, so Eule points out newer releases.
+const updateService = new UpdateService();
+const updateChecksEnabled = configManager.get().updates?.check !== false;
+registerAuthTools(server, authService, () =>
+  updateChecksEnabled ? updateNotice(updateService.cached()) : undefined,
+);
+registerUpdateTools(server, updateService);
 
 registerConfigTools(
   server,
@@ -95,6 +104,8 @@ process.on("uncaughtException", (err: unknown) => {
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  // Advisory and rate-limited to once a day; failures stay silent.
+  if (updateChecksEnabled) void updateService.status();
 }
 
 main().catch((error: unknown) => {

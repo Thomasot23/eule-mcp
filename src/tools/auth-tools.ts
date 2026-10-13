@@ -3,7 +3,11 @@ import { z } from "zod";
 import type { AuthService } from "../services/auth-service.js";
 import { executeTool, textResult } from "./tool-runtime.js";
 
-export function registerAuthTools(server: McpServer, auth: AuthService): void {
+export function registerAuthTools(
+  server: McpServer,
+  auth: AuthService,
+  updateNotice: () => string | undefined = () => undefined,
+): void {
   server.registerTool(
     "auth_status",
     {
@@ -16,6 +20,7 @@ export function registerAuthTools(server: McpServer, auth: AuthService): void {
         "auth_status",
         () => {
           const status = auth.status();
+          const notice = updateNotice();
           const roles = status.roles.map(
             (r) =>
               `  ${r.id}: ${r.name} (${String(r.weeklyHours)}h/week, ${String(r.mail)} mail, ${String(r.calendar)} cal)`,
@@ -36,6 +41,7 @@ export function registerAuthTools(server: McpServer, auth: AuthService): void {
                 : ["  none — use auth_login (or run 'eule-mcp login') to add an account"]),
               "",
               `Data: ${status.dataPath}`,
+              ...(notice ? ["", notice] : []),
             ].join("\n"),
           );
         },

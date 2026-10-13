@@ -144,6 +144,8 @@ export interface AppConfig {
   readonly oauth: OAuthConfig;
   readonly google?: GoogleOAuthConfig;
   readonly autoAuth?: readonly AutoAuthConfig[];
+  /** Daily check for a newer Eule release (on unless `check: false`). */
+  readonly updates?: { readonly check: boolean };
   readonly roles: readonly RoleConfig[];
 }
 

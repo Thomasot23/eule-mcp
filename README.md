@@ -76,7 +76,7 @@ Eule is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) serve
 | `auth_accounts` | List token health without exposing credentials |
 | `auth_logout` | Remove locally stored tokens for an account |
 
-### 👤 Roles, accounts & configuration (18)
+### 👤 Roles, accounts & configuration (19)
 
 Eule can be configured end-to-end by an LLM without the user editing YAML.
 **No MCP tool accepts a secret**: a write that needs a password, API token,
@@ -105,6 +105,7 @@ committed to `config.yaml`.
 | `totp_remove` | Remove a TOTP binding and local secret `[DESTRUCTIVE]` |
 | `m365_password_configure` | Opt in to local M365 webview password autofill `[WRITES]` |
 | `m365_password_remove` | Remove an M365 password-autofill binding `[DESTRUCTIVE]` |
+| `eule_update` | Check for a newer release, or download its verified `eule-mcp.mcpb` to `~/Downloads` |
 
 Roles can define an enforceable `policy` with `enabled`, `readOnly`, and
 `allowedConnectorKinds`. Policy checks happen centrally in the connector
@@ -300,6 +301,15 @@ needs to be installed. Configuration, the local database and tokens live in
 `~/.eule`, exactly as with a source install, so switching between the two keeps
 your setup. Updates arrive by installing the newer `eule-mcp.mcpb` over the old
 one.
+
+MCP Bundles have no update channel, so Eule watches for releases itself. It
+asks GitHub for the latest release at most once a day (cached in
+`~/.eule/update-check.json`), and `auth_status` mentions a newer version when
+one exists. `eule_update` reports the installed and latest version; with
+`action: "download"` it saves the release's `eule-mcp.mcpb` to `~/Downloads`
+after checking it against the published SHA-256. Installing it stays a
+double-click: Eule never replaces its own files. To turn the check off, set
+`updates: { check: false }` in `config.yaml`.
 
 The tools appear as `mcp__eule-mcp__*`: Claude Desktop derives the prefix from
 the extension's display name, which is therefore `eule-mcp`. If you previously
