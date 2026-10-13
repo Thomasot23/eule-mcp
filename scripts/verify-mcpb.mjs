@@ -27,6 +27,8 @@ const TARGETS = ["darwin-universal", "linux-x64", "linux-arm64", "win32-x64", "w
 // Same naming as bundledHelperDir() in src/helper/download.ts.
 const hostTarget =
   process.platform === "darwin" ? "darwin-universal" : `${process.platform}-${process.arch}`;
+const windowsTar = () => join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe");
+
 const helperFile = (target) =>
   join(target, target.startsWith("win32-") ? "eule-helper.exe" : "eule-helper");
 
@@ -36,8 +38,10 @@ const env = { ...process.env, HOME: home, USERPROFILE: home };
 delete env.EULE_HELPER_PATH;
 
 try {
-  // Windows has no unzip, but its bsdtar reads zip archives.
-  if (process.platform === "win32") execFileSync("tar", ["-xf", bundle, "-C", root]);
+  // Windows has no unzip, but its bsdtar reads zip archives. Called by full
+  // path: in Git Bash, GNU tar comes first on PATH and takes the drive letter
+  // of "D:\a\..." for a remote host ("Cannot connect to D: resolve failed").
+  if (process.platform === "win32") execFileSync(windowsTar(), ["-xf", bundle, "-C", root]);
   else execFileSync("unzip", ["-qq", bundle, "-d", root]);
   const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
   const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
