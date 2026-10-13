@@ -8,7 +8,7 @@ export function registerUpdateTools(server: McpServer, updates: UpdateService): 
     "eule_update",
     {
       description:
-        'Check for a newer Eule release ("status") or download its verified extension bundle to ~/Downloads ("download"). Installing the bundle is up to the user (double-click it); Eule never replaces itself.',
+        'Check for a newer Eule release ("status") or download its verified extension bundle to the download folder ("download"). Installing the bundle is up to the user (double-click it); Eule never replaces itself.',
       inputSchema: { action: z.enum(["status", "download"]).optional() },
       annotations: { readOnlyHint: false, openWorldHint: true },
     },

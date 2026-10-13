@@ -5,13 +5,14 @@
  * MCP Bundles have no update channel of their own: a locally installed
  * `.mcpb` changes only when the user installs a new one. Eule therefore
  * checks GitHub's latest release at most once a day and, when asked,
- * downloads the checksum-verified `eule-mcp.mcpb` to ~/Downloads. It never
+ * downloads the checksum-verified `eule-mcp.mcpb` to the download folder. It never
  * rewrites its own installation directory, which the desktop app manages.
  */
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { downloadsDirectory } from "../utils/downloads-dir.js";
 import { EULE_VERSION } from "../version.js";
 
 const REPO = "metaneutrons/eule-mcp";
@@ -69,7 +70,7 @@ function sha256(buffer: Buffer): string {
 export class UpdateService {
   private readonly current: string;
   private readonly cachePath: string;
-  private readonly downloadsDir: string;
+  private readonly downloadsDir?: string;
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => number;
   private pending?: Promise<UpdateStatus>;
@@ -77,7 +78,7 @@ export class UpdateService {
   constructor(options: UpdateServiceOptions = {}) {
     this.current = options.currentVersion ?? EULE_VERSION;
     this.cachePath = options.cachePath ?? join(homedir(), ".eule", "update-check.json");
-    this.downloadsDir = options.downloadsDir ?? join(homedir(), "Downloads");
+    this.downloadsDir = options.downloadsDir;
     this.fetchImpl = options.fetch ?? fetch;
     this.now = options.now ?? Date.now;
   }
@@ -103,7 +104,7 @@ export class UpdateService {
   }
 
   /**
-   * Download the latest release's bundle to ~/Downloads after verifying its
+   * Download the latest release's bundle to the download folder after verifying its
    * published SHA-256. Returns the file path.
    */
   async download(): Promise<{ path: string; version: string }> {
@@ -118,14 +119,16 @@ export class UpdateService {
     if (!expected || !/^[0-9a-f]{64}$/.test(expected))
       throw new Error(`Malformed checksum for ${BUNDLE_ASSET}: ${checksumText}`);
 
-    const path = join(this.downloadsDir, `eule-mcp-${latest.version}.mcpb`);
+    // Resolved per download: the user may have moved the folder meanwhile.
+    const downloadsDir = this.downloadsDir ?? downloadsDirectory();
+    const path = join(downloadsDir, `eule-mcp-${latest.version}.mcpb`);
     if (existsSync(path) && sha256(readFileSync(path)) === expected)
       return { path, version: latest.version };
 
     const bundle = await this.fetchBuffer(latest.bundleUrl);
     if (sha256(bundle) !== expected)
       throw new Error(`Checksum mismatch for ${BUNDLE_ASSET} v${latest.version}; not saved.`);
-    mkdirSync(this.downloadsDir, { recursive: true });
+    mkdirSync(downloadsDir, { recursive: true });
     writeFileSync(path, bundle);
     return { path, version: latest.version };
   }
