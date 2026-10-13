@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/metaneutrons/eule-mcp/compare/v0.9.1...v0.10.0) (2026-10-13)
+
+
+### Features
+
+* **update:** point out newer releases and fetch the verified bundle ([#107](https://github.com/metaneutrons/eule-mcp/issues/107)) ([8e01eb9](https://github.com/metaneutrons/eule-mcp/commit/8e01eb9b2ea7ef14cef6aefef5dd261ce6675fd3))
+
+
+### Bug Fixes
+
+* **imap:** read the decoded text part instead of the raw MIME source ([#106](https://github.com/metaneutrons/eule-mcp/issues/106)) ([3c1fd2e](https://github.com/metaneutrons/eule-mcp/commit/3c1fd2ea41e8f97c73e6210b1e856e23b118eef1))
+
 ## [0.9.1](https://github.com/metaneutrons/eule-mcp/compare/v0.9.0...v0.9.1) (2026-10-13)
 
 
