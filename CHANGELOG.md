@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.9.1](https://github.com/metaneutrons/eule-mcp/compare/v0.9.0...v0.9.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* **imap:** file sent mail in the folder the server flags as Sent (option sentMailbox) ([404ce76](https://github.com/metaneutrons/eule-mcp/commit/404ce7691a42b2959f002d35f4f66a498e84854b))
+* **imap:** list an empty mailbox instead of failing ([404ce76](https://github.com/metaneutrons/eule-mcp/commit/404ce7691a42b2959f002d35f4f66a498e84854b))
+* **imap:** take an existing folder name literally ([404ce76](https://github.com/metaneutrons/eule-mcp/commit/404ce7691a42b2959f002d35f4f66a498e84854b))
+
 ## [0.9.0](https://github.com/metaneutrons/eule-mcp/compare/v0.8.1...v0.9.0) (2026-10-12)
 
 
