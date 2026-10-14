@@ -67,7 +67,7 @@
     "@modelcontextprotocol/sdk": "^1.32.0",
     "better-sqlite3": "^13.0.3",
     "fast-xml-parser": "^5.11.2",
-    "imapflow": "^1.7.7",
+    "imapflow": "^2.4.0",
     "js-yaml": "^5.4.2",
     "marked": "^18.0.14",
     "nodemailer": "^10.0.15",
