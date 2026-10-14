@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/metaneutrons/eule-mcp/compare/v0.10.0...v0.10.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* **update:** save the bundle to the platform's real download folder ([#110](https://github.com/metaneutrons/eule-mcp/issues/110)) ([dcce273](https://github.com/metaneutrons/eule-mcp/commit/dcce273be029124819725902557282a0265a5de3))
+
 ## [0.10.0](https://github.com/metaneutrons/eule-mcp/compare/v0.9.1...v0.10.0) (2026-10-13)
 
 
