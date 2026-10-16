@@ -83,6 +83,15 @@ export const CONNECTOR_CAPABILITIES: Readonly<
     requiredFields: ["url"],
     optionalFields: [],
   },
+  // MediaWiki and BlueSpice. Signs in with the user's own wiki account (also
+  // SSO/LDAP accounts behind PluggableAuth) or a bot password "User@Bot";
+  // neither needs a wiki administrator.
+  mediawiki: {
+    kinds: ["wiki"],
+    credential: "password",
+    requiredFields: ["url"],
+    optionalFields: [],
+  },
 };
 
 export function assertConnectorCapability(

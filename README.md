@@ -64,7 +64,7 @@ Eule is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) serve
 - **Role-based context** — map accounts and connectors to professional roles
 - **LLM-optimized output** — HTML emails rendered as clean Markdown with thread splitting
 
-## Tools (63)
+## Tools (68)
 
 ### 🔐 Auth (5)
 
@@ -273,19 +273,33 @@ report an error, not an empty search.
 | `doc_tag` | Update document metadata (title, tags, correspondent, type) |
 | `doc_bulk` | Bulk operations (add/remove tag, set type, delete, merge, reprocess) |
 
+### 📚 Wiki (5)
+
+Read-only access to wikis and intranets (MediaWiki, BlueSpice): process
+documentation, regulations and the files attached to them.
+
+| Tool | Description |
+|---|---|
+| `wiki_search` | Full-text search across pages and uploaded files, with excerpts |
+| `wiki_read` | Read a page as Markdown (or wikitext), with sections, categories and attached files |
+| `wiki_list` | List a category's pages, pages by title prefix, or recent changes |
+| `wiki_file_read` | Read the text of an uploaded PDF/Office/text file (pymupdf4llm, pandoc) |
+| `wiki_file_download` | Save an uploaded file locally |
+
 ## Provider Matrix
 
-| | Mail | Calendar | Contacts | Tasks | Chat | Files | Documents |
-|---|---|---|---|---|---|---|---|
-| **M365 Graph** | ✅ rw | ✅ rw | ✅ rw | ✅ rw¹ | ✅ Teams | ✅ rw | — |
-| **M365 EWS** | ✅ rw | ✅ rw | ✅ rw | — | — | — | — |
-| **Google** | ✅ rw | ✅ rw | ✅ rw | — | — | ✅ rw | — |
-| **IMAP/SMTP** | ✅ rw | — | — | — | — | — | — |
-| **CalDAV** | — | ✅ rw | — | ✅ rw² | — | — | — |
-| **CardDAV** | — | — | ✅ rw | — | — | — | — |
-| **iCal Feed** | — | ro | — | — | — | — | — |
-| **Signal** | — | — | — | — | ✅ rw | — | — |
-| **Paperless-NGX** | — | — | — | — | — | — | ✅ rw |
+| | Mail | Calendar | Contacts | Tasks | Chat | Files | Documents | Wiki |
+|---|---|---|---|---|---|---|---|---|
+| **M365 Graph** | ✅ rw | ✅ rw | ✅ rw | ✅ rw¹ | ✅ Teams | ✅ rw | — | — |
+| **M365 EWS** | ✅ rw | ✅ rw | ✅ rw | — | — | — | — | — |
+| **Google** | ✅ rw | ✅ rw | ✅ rw | — | — | ✅ rw | — | — |
+| **IMAP/SMTP** | ✅ rw | — | — | — | — | — | — | — |
+| **CalDAV** | — | ✅ rw | — | ✅ rw² | — | — | — | — |
+| **CardDAV** | — | — | ✅ rw | — | — | — | — | — |
+| **iCal Feed** | — | ro | — | — | — | — | — | — |
+| **Signal** | — | — | — | — | ✅ rw | — | — | — |
+| **Paperless-NGX** | — | — | — | — | — | — | ✅ rw | — |
+| **MediaWiki / BlueSpice** | — | — | — | — | — | — | — | ro |
 
 ¹ Microsoft To Do; requires the opt-in `Tasks.ReadWrite` scope.
 ² VTODO collections: Apple Reminders (iCloud), Nextcloud Tasks.
@@ -565,6 +579,29 @@ themselves, so the copy is skipped there; `saveSentCopy: true|false` overrides
 the default. The Sent folder is the one the server flags as `\Sent` (iCloud:
 "Sent Messages"). Without a flag, the folder with a common Sent name that holds
 the most mail is used. `sentMailbox: "<path>"` names the folder explicitly.
+
+**Wikis and intranets** (MediaWiki, BlueSpice) are read with your own wiki
+account; no wiki administrator, API key or extension is needed:
+
+```yaml
+      wiki:
+        - id: intranet
+          type: mediawiki
+          account: "your-wiki-username"
+          url: "https://intranet.example.org/w"   # script path; api.php is found below it
+          credentialRef: "connector/work/wiki/intranet.a1b2c3d4"
+```
+
+Eule signs in through the wiki's own login form, exactly like a browser. This
+also covers accounts that the wiki checks against LDAP/Active Directory through
+PluggableAuth (common for BlueSpice intranets), which the API's `action=login`
+refuses. An account written as `User@BotName` is treated as a bot password
+(Special:BotPasswords, self-service) and signs in through `action=login`.
+Wikis that hand the sign-in to an external identity provider (SAML/OIDC
+redirect) are not supported. The session lives in memory only, is renewed once
+when it expires, and a rejected password is not retried for ten minutes so a
+directory account cannot be locked out. The connector only reads: the sign-in
+is its only POST. Reading PDFs needs `pymupdf4llm`, Office files need `pandoc`.
 
 Folder names passed to the mail tools are taken literally when the account has a
 folder of exactly that name. Otherwise well-known names such as "Sent",

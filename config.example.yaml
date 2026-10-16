@@ -90,6 +90,14 @@ roles:
         - id: vpdit-todo
           type: m365
           account: fabian@hs-hannover.de
+      # Intranet wiki (MediaWiki/BlueSpice), read-only with your own wiki
+      # account. The password is captured via `eule-mcp configure`.
+      # wiki:
+      #   - id: intranet
+      #     type: mediawiki
+      #     account: your-wiki-username
+      #     url: "https://intranet.example.org/w"
+      #     credentialRef: "connector/work/wiki/intranet.a1b2c3d4"
   - id: lexICT
     name: "lexICT GmbH"
     weeklyHours: 8

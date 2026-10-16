@@ -15,6 +15,7 @@ import {
   AuthService,
   TaskService,
   UpdateService,
+  WikiService,
   updateNotice,
 } from "../services/index.js";
 import { registerAuthTools } from "../tools/auth-tools.js";
@@ -28,6 +29,7 @@ import { registerMailTools } from "../tools/mail-tools.js";
 import { registerMessengerTools } from "../tools/messenger-tools.js";
 import { registerTaskTools } from "../tools/task-tools.js";
 import { registerUpdateTools } from "../tools/update-tools.js";
+import { registerWikiTools } from "../tools/wiki-tools.js";
 import { ConnectorRegistry } from "../connectors/index.js";
 import { tokenRepository } from "../auth/token-repository.js";
 import { M365Reauth } from "../auth/m365-reauth.js";
@@ -88,6 +90,7 @@ registerTaskTools(server, new TaskService(registry));
 const contactManager = new ContactManager(dbManager);
 registerContactTools(server, new ContactService(registry, contactManager));
 registerDocumentTools(server, new DocumentService(registry));
+registerWikiTools(server, new WikiService(registry));
 
 // --- Server startup ---
 

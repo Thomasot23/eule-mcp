@@ -12,3 +12,4 @@ export { AttachmentService } from "./attachment-service.js";
 export { AuthService } from "./auth-service.js";
 export { UpdateService, updateNotice } from "./update-service.js";
 export type { Briefing } from "./briefing-service.js";
+export { WikiService } from "./wiki-service.js";

@@ -6,6 +6,7 @@ import type {
   FileConnector,
   DocumentConnector,
   TaskConnector,
+  WikiConnector,
   RoleConfig,
   ConnectorConfig,
 } from "../types/index.js";
@@ -35,6 +36,7 @@ import { GoogleCalendarConnector } from "../providers/google/google-calendar.js"
 import { GoogleContactConnector } from "../providers/google/google-contacts.js";
 import { GoogleDriveConnector } from "../providers/google/google-drive.js";
 import { PaperlessConnector } from "../providers/paperless/index.js";
+import { MediaWikiConnector } from "../providers/mediawiki/index.js";
 import { RolePolicyService, type AccessMode } from "../config/index.js";
 import { ConfiguredCredentialResolver } from "../helper/configured-credential-resolver.js";
 
@@ -512,6 +514,19 @@ export class ConnectorRegistry {
         } else {
           this.documentConnectors.delete(key);
         }
+      }
+    }
+    return connectors;
+  }
+
+  /** Get all wiki connectors (read-only), optionally filtered by role. */
+  getWikiConnectors(role?: string): WikiConnector[] {
+    const connectors: WikiConnector[] = [];
+    for (const r of this.policy.select(role, "wiki", "read")) {
+      for (const wc of r.connectors.wiki ?? []) {
+        const password = this.secrets.connector(wc);
+        if (wc.type === "mediawiki" && wc.url && password)
+          connectors.push(new MediaWikiConnector(wc.account, wc.url, password));
       }
     }
     return connectors;

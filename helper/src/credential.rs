@@ -81,7 +81,10 @@ fn validate_reference(reference: &str) -> Result<(), String> {
     let segments: Vec<_> = reference.split('/').collect();
     let shape_is_valid = match segments.as_slice() {
         ["connector", _, kind, _] => {
-            matches!(*kind, "mail" | "calendar" | "contacts" | "messenger" | "files" | "documents")
+            matches!(
+                *kind,
+                "mail" | "calendar" | "contacts" | "messenger" | "files" | "documents" | "wiki"
+            )
         }
         ["oauth", "google", secret] => {
             *secret == "client-secret"
@@ -117,6 +120,8 @@ mod tests {
     fn accepts_scoped_connector_references_only() {
         assert!(validate_reference("connector/personal/mail/icloud").is_ok());
         assert!(validate_reference("connector/work/mail/user@example.com").is_ok());
+        assert!(validate_reference("connector/work/wiki/intranet.a1b2").is_ok());
+        assert!(validate_reference("connector/work/unknown/intranet").is_err());
         assert!(validate_reference("oauth/google/client-secret.a1b2").is_ok());
         assert!(validate_reference("oauth/google/client-secretevil").is_err());
         assert!(validate_reference("oauth/m365/password/a1b2.c3d4").is_ok());

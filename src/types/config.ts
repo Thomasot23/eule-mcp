@@ -2,7 +2,15 @@
 export interface ConnectorConfig {
   readonly id: string;
   readonly type:
-    "m365" | "imap" | "caldav" | "carddav" | "ical" | "signal" | "google" | "paperless";
+    | "m365"
+    | "imap"
+    | "caldav"
+    | "carddav"
+    | "ical"
+    | "signal"
+    | "google"
+    | "paperless"
+    | "mediawiki";
   readonly account: string;
   /** For shared/delegate mailboxes. Auth uses `account`, access targets `mailbox`. */
   readonly mailbox?: string;
@@ -68,6 +76,8 @@ export interface RoleConnectors {
   /** Task backends: Microsoft To Do via Graph, or VTODO over CalDAV
    *  (Apple Reminders, Nextcloud Tasks). */
   readonly tasks?: readonly ConnectorConfig[];
+  /** Wikis and intranets (MediaWiki, BlueSpice): pages and attached files, read-only. */
+  readonly wiki?: readonly ConnectorConfig[];
 }
 
 /** A single role definition. */

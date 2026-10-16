@@ -339,6 +339,91 @@ export interface DocumentConnector {
   createDocumentType(name: string, opts?: { match?: string }): Promise<DocDocumentType>;
 }
 
+/** A search hit in a wiki. */
+export interface WikiSearchHit {
+  readonly title: string;
+  readonly namespace: number;
+  /** Plain-text excerpt around the match, if the wiki supplies one. */
+  readonly snippet?: string;
+  readonly timestamp?: string;
+  readonly size?: number;
+  readonly url: string;
+}
+
+/** A wiki page rendered for reading. */
+export interface WikiPage {
+  readonly title: string;
+  readonly pageId: number;
+  readonly revisionId?: number;
+  readonly timestamp?: string;
+  readonly url: string;
+  /** Markdown converted from the rendered page, or raw wikitext. */
+  readonly content: string;
+  readonly format: "markdown" | "wikitext";
+  readonly sections: readonly { readonly index: string; readonly title: string }[];
+  readonly categories: readonly string[];
+  /** Files embedded in or linked from the page (file names without namespace). */
+  readonly files: readonly string[];
+  /** Set when the requested title redirected here. */
+  readonly redirectedFrom?: string;
+}
+
+/** An entry of a page listing (category, prefix or recent changes). */
+export interface WikiPageRef {
+  readonly title: string;
+  readonly namespace: number;
+  readonly timestamp?: string;
+  readonly user?: string;
+  readonly comment?: string;
+  readonly url: string;
+}
+
+export interface WikiPageListing {
+  readonly pages: readonly WikiPageRef[];
+  /** Opaque token for the next page of results. */
+  readonly continueFrom?: string;
+}
+
+export interface WikiListOptions {
+  readonly category?: string;
+  readonly prefix?: string;
+  readonly namespace?: number;
+  /** List recently changed pages instead of a category or prefix. */
+  readonly recent?: boolean;
+  readonly limit?: number;
+  readonly continueFrom?: string;
+}
+
+/** Metadata of an uploaded file. */
+export interface WikiFileInfo {
+  /** File name without namespace prefix. */
+  readonly name: string;
+  readonly title: string;
+  readonly size: number;
+  readonly mime: string;
+  readonly timestamp?: string;
+  readonly user?: string;
+  readonly url: string;
+  readonly descriptionUrl: string;
+}
+
+/** Read-only wiki connector (MediaWiki, BlueSpice). */
+export interface WikiConnector {
+  readonly account: string;
+  readonly tier: string;
+  search(
+    query: string,
+    options?: { limit?: number; namespaces?: readonly number[]; titlesOnly?: boolean },
+  ): Promise<WikiSearchHit[]>;
+  readPage(
+    title: string,
+    options?: { format?: "markdown" | "wikitext"; section?: number },
+  ): Promise<WikiPage>;
+  listPages(options: WikiListOptions): Promise<WikiPageListing>;
+  fileInfo(name: string): Promise<WikiFileInfo>;
+  downloadFile(name: string): Promise<{ info: WikiFileInfo; data: Buffer }>;
+}
+
 /** A task list / collection (a To Do list, or a CalDAV VTODO collection). */
 export interface TaskListInfo {
   readonly id: string;

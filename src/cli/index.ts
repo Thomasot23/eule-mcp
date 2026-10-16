@@ -77,7 +77,9 @@ async function configure(): Promise<void> {
       });
     }
 
-    console.log("1) Microsoft 365  2) IMAP/SMTP  3) CalDAV  4) CardDAV  5) Paperless");
+    console.log(
+      "1) Microsoft 365  2) IMAP/SMTP  3) CalDAV  4) CardDAV  5) Paperless  6) MediaWiki/BlueSpice",
+    );
     const choice = (await io.question("Connector type: ")).trim();
     const definitions: Record<string, { type: ConnectorConfig["type"]; kind: ConnectorKind }> = {
       "1": { type: "m365", kind: "mail" },
@@ -85,6 +87,7 @@ async function configure(): Promise<void> {
       "3": { type: "caldav", kind: "calendar" },
       "4": { type: "carddav", kind: "contacts" },
       "5": { type: "paperless", kind: "documents" },
+      "6": { type: "mediawiki", kind: "wiki" },
     };
     const definition = definitions[choice];
     if (!definition) throw new Error("Unsupported connector selection");
@@ -97,7 +100,7 @@ async function configure(): Promise<void> {
     if (definition.type === "imap") {
       host = (await io.question("IMAP host: ")).trim();
       smtpHost = (await io.question("SMTP host: ")).trim();
-    } else if (["caldav", "carddav", "paperless"].includes(definition.type)) {
+    } else if (["caldav", "carddav", "paperless", "mediawiki"].includes(definition.type)) {
       url = (await io.question("Service URL (https://): ")).trim();
     }
     const result = await control.configureConnector({

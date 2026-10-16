@@ -50,7 +50,7 @@ export function m365PasswordCredentialRef(account: string): string {
 }
 
 export const CONNECTOR_CREDENTIAL_REF_PATTERN =
-  /^connector\/[A-Za-z0-9@+][A-Za-z0-9@+._-]*\/(?:mail|calendar|contacts|messenger|files|documents)\/[A-Za-z0-9@+][A-Za-z0-9@+._-]*$/;
+  /^connector\/[A-Za-z0-9@+][A-Za-z0-9@+._-]*\/(?:mail|calendar|contacts|messenger|files|documents|wiki)\/[A-Za-z0-9@+][A-Za-z0-9@+._-]*$/;
 export const GOOGLE_CREDENTIAL_REF_PATTERN = /^oauth\/google\/client-secret(?:\.[A-Za-z0-9]+)?$/;
 export const TOTP_CREDENTIAL_REF_PATTERN = /^totp\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export const M365_PASSWORD_CREDENTIAL_REF_PATTERN =

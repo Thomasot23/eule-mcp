@@ -48,4 +48,11 @@ export type {
   RemoteTaskInput,
   RemoteTaskUpdate,
   TaskConnector,
+  WikiSearchHit,
+  WikiPage,
+  WikiPageRef,
+  WikiPageListing,
+  WikiListOptions,
+  WikiFileInfo,
+  WikiConnector,
 } from "./connectors.js";

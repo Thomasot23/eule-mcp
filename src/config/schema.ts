@@ -17,6 +17,7 @@ export const CONNECTOR_KINDS = [
   "files",
   "documents",
   "tasks",
+  "wiki",
 ] as const;
 
 export const CONNECTOR_TYPES = [
@@ -28,6 +29,7 @@ export const CONNECTOR_TYPES = [
   "signal",
   "google",
   "paperless",
+  "mediawiki",
 ] as const;
 
 export const CONFIG_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
