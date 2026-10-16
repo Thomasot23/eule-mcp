@@ -280,7 +280,7 @@ documentation, regulations and the files attached to them.
 
 | Tool | Description |
 |---|---|
-| `wiki_search` | Full-text search across pages and uploaded files, with excerpts |
+| `wiki_search` | Full-text search across pages and uploaded files (BlueSpice: also inside the files), with excerpts |
 | `wiki_read` | Read a page as Markdown (or wikitext), with sections, categories and attached files |
 | `wiki_list` | List a category's pages, pages by title prefix, or recent changes |
 | `wiki_file_read` | Read the text of an uploaded PDF/Office/text file (pymupdf4llm, pandoc) |
@@ -602,6 +602,13 @@ redirect) are not supported. The session lives in memory only, is renewed once
 when it expires, and a rejected password is not retried for ten minutes so a
 directory account cannot be locked out. The connector only reads: the sign-in
 is its only POST. Reading PDFs needs `pymupdf4llm`, Office files need `pandoc`.
+
+On BlueSpice, `wiki_search` uses BlueSpice's own search
+(`bs-extendedsearch-query`) when the wiki offers it, because that index also
+holds the text of uploaded PDF and Office files. Without it, or when its search
+backend fails, and whenever `namespaces` or `titles_only` is given, the
+standard MediaWiki search answers instead. Hits in external file shares and
+special pages are left out, since the other wiki tools cannot open them.
 
 Folder names passed to the mail tools are taken literally when the account has a
 folder of exactly that name. Otherwise well-known names such as "Sent",

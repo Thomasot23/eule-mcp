@@ -41,7 +41,10 @@ interface FakeWiki {
 }
 
 /** A private BlueSpice wiki: /api.php redirects, /w/api.php needs a session. */
-function fakeWiki(credentials: { user: string; password: string }): FakeWiki {
+function fakeWiki(
+  credentials: { user: string; password: string },
+  extendedSearch: "none" | "ok" | "broken" = "none",
+): FakeWiki {
   const signedIn = new Set<string>();
   const posts: string[] = [];
   let nextSession = 1;
@@ -123,6 +126,44 @@ function fakeWiki(credentials: { user: string; password: string }): FakeWiki {
         return json({
           error: { code: p.get("assert") ? "assertuserfailed" : "readapidenied", info: "denied" },
         });
+      if (p.get("action") === "paraminfo")
+        // An unknown module is only a warning; "modules" is then missing.
+        return json(
+          extendedSearch === "none"
+            ? { paraminfo: { helpformat: "none" } }
+            : { paraminfo: { modules: [{ name: "bs-extendedsearch-query" }] } },
+        );
+      if (p.get("action") === "bs-extendedsearch-query") {
+        const lookup = JSON.parse(p.get("q") ?? "{}") as Record<string, unknown>;
+        expect(lookup).toMatchObject({
+          query: { bool: { must: [{ query_string: { default_operator: "AND" } }] } },
+        });
+        if (extendedSearch === "broken")
+          return json({ exception: 1, exceptionType: "Elastica\\Exception\\Connection" });
+        // Shaped like BlueSpiceExtendedSearch's WikiPage/RepoFile formatters.
+        return json({
+          total: 3,
+          results: [
+            {
+              type: "wikipage",
+              prefixed_title: "Handbuch:Dienstreise",
+              namespace: 3000,
+              namespace_text: "Handbuch",
+              highlight: "Antrag auf <b>Dienstreise</b>",
+              mtime: "16. Oktober 2026",
+            },
+            {
+              type: "repofile",
+              filename: "Reiseantrag_2026.pdf",
+              namespace: 6,
+              namespace_text: "Datei",
+              highlight: "Formular für <b>Dienstreisen</b> &amp; Kostenstelle",
+              size: 52000,
+            },
+            { type: "specialpage", basename: "Spezial:Hochladen" },
+          ],
+        });
+      }
       if (p.get("meta") === "siteinfo")
         return json({
           query: {
@@ -303,6 +344,23 @@ describe("MediaWikiConnector", () => {
     ).resolves.toHaveLength(1);
   });
 
+  it("retries at once after an outage, unlike after a rejected password", async () => {
+    let down = true;
+    const fetchWiki = wiki.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL, init?: RequestInit) =>
+        down && String(input).includes("Special:UserLogin")
+          ? new Response("Service Unavailable", { status: 503 })
+          : (fetchWiki(input, init) as Promise<Response>),
+      ),
+    );
+    const connector = new MediaWikiConnector("tester", ORIGIN, "geheim");
+    await expect(connector.search("x")).rejects.toThrow(/sign-in page answered 503/);
+    down = false;
+    await expect(connector.search("x")).resolves.toHaveLength(1);
+  });
+
   it("signs in with a bot password through action=login", async () => {
     resetMediaWikiSessions();
     wiki = fakeWiki({ user: "tester@eule", password: "botsecret" });
@@ -383,5 +441,46 @@ describe("mediawiki connector configuration", () => {
     expect(
       parseConnectorConfig({ ...base, credentialRef: "connector/work/wiki/intranet.a1b2" }),
     ).toMatchObject({ credentialRef: "connector/work/wiki/intranet.a1b2" });
+  });
+});
+
+describe("MediaWikiConnector on BlueSpice with ExtendedSearch", () => {
+  beforeEach(() => resetMediaWikiSessions());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("searches page and file contents through bs-extendedsearch-query", async () => {
+    vi.stubGlobal("fetch", fakeWiki({ user: "tester", password: "geheim" }, "ok").fetch);
+    const hits = await new MediaWikiConnector("tester", ORIGIN, "geheim").search("Dienstreise");
+    expect(hits).toEqual([
+      {
+        title: "Handbuch:Dienstreise",
+        namespace: 3000,
+        snippet: "Antrag auf Dienstreise",
+        size: undefined,
+        url: `${ORIGIN}/w/index.php?title=Handbuch%3ADienstreise`,
+      },
+      {
+        title: "Datei:Reiseantrag_2026.pdf",
+        namespace: 6,
+        snippet: "Formular für Dienstreisen & Kostenstelle",
+        size: 52000,
+        url: `${ORIGIN}/w/index.php?title=Datei%3AReiseantrag_2026.pdf`,
+      },
+    ]);
+  });
+
+  it("falls back to MediaWiki search when the search backend fails", async () => {
+    vi.stubGlobal("fetch", fakeWiki({ user: "tester", password: "geheim" }, "broken").fetch);
+    const hits = await new MediaWikiConnector("tester", ORIGIN, "geheim").search("Dienstreise");
+    expect(hits.map((h) => h.title)).toEqual(["Dienstreise"]);
+  });
+
+  it("uses MediaWiki search for namespace and title filters", async () => {
+    const wiki = fakeWiki({ user: "tester", password: "geheim" }, "ok");
+    vi.stubGlobal("fetch", wiki.fetch);
+    await new MediaWikiConnector("tester", ORIGIN, "geheim").search("x", { namespaces: [6] });
+    const actions = wiki.fetch.mock.calls.map(([input]) => new URL(String(input)).searchParams);
+    expect(actions.some((q) => q.get("action") === "bs-extendedsearch-query")).toBe(false);
+    expect(actions.find((q) => q.get("list") === "search")?.get("srnamespace")).toBe("6");
   });
 });

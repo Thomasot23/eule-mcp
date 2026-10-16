@@ -41,6 +41,25 @@ interface Endpoints {
 
 interface SiteInfo {
   readonly searchNamespaces: readonly number[];
+  /** BlueSpice ExtendedSearch is installed; it also indexes file contents. */
+  readonly extendedSearch: boolean;
+}
+
+/** A hit of BlueSpice's bs-extendedsearch-query, as its formatters return it. */
+interface ExtendedSearchResult {
+  readonly type?: string;
+  readonly prefixed_title?: string;
+  readonly filename?: string;
+  readonly namespace?: number;
+  readonly namespace_text?: string;
+  readonly highlight?: string;
+  readonly rendered_content_snippet?: string;
+  readonly size?: number;
+}
+
+interface ExtendedSearchResponse extends ApiResponse {
+  readonly results?: readonly ExtendedSearchResult[];
+  readonly exception?: number;
 }
 
 interface Session {
@@ -55,6 +74,9 @@ interface Session {
   failure?: { readonly message: string; readonly at: number };
 }
 
+/** The wiki refused the username or password (as opposed to an outage). */
+class SignInRejected extends Error {}
+
 /** Sessions outlive connector objects, which the registry builds per call. */
 const sessions = new Map<string, Session>();
 const FAILED_SIGN_IN_PAUSE_MS = 10 * 60 * 1000;
@@ -67,6 +89,7 @@ const SESSION_LOST = new Set([
 ]);
 // Namespaces of wiki internals that only add noise to a knowledge search.
 const NOISE_NAMESPACES = new Set([8, 10, 828]);
+const EXTENDED_SEARCH_MODULE = "bs-extendedsearch-query";
 
 /** Strips a "File:"/"Datei:"/"Image:"/"Bild:" prefix. */
 export function fileName(name: string): string {
@@ -164,8 +187,10 @@ export class MediaWikiConnector implements WikiConnector {
         this.session.signedIn = true;
         this.session.failure = undefined;
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        this.session.failure = { message, at: Date.now() };
+        // Only a rejected credential pauses retries; an outage or a changed
+        // login page must not keep the connector down for ten minutes.
+        if (error instanceof SignInRejected)
+          this.session.failure = { message: error.message, at: Date.now() };
         throw error;
       } finally {
         this.session.signingIn = undefined;
@@ -193,7 +218,7 @@ export class MediaWikiConnector implements WikiConnector {
     });
     const data = (await res.json()) as ApiResponse;
     if (data.login?.result !== "Success")
-      throw new Error(
+      throw new SignInRejected(
         `Wiki sign-in with bot password failed: ${data.login?.reason ?? data.error?.info ?? data.login?.result ?? String(res.status)}`,
       );
   }
@@ -201,6 +226,8 @@ export class MediaWikiConnector implements WikiConnector {
   private async formSignIn(): Promise<void> {
     const { index } = await this.endpoints();
     const page = await sessionFetch(this.session.jar, `${index}?title=Special:UserLogin`);
+    if (!page.res.ok)
+      throw new Error(`The wiki's sign-in page answered ${String(page.res.status)}.`);
     const form = parseLoginForm(await page.res.text(), page.url);
     const body = new URLSearchParams(form.fields);
     body.set(form.usernameField, this.account);
@@ -214,7 +241,7 @@ export class MediaWikiConnector implements WikiConnector {
     const user = await this.call({ action: "query", meta: "userinfo" }, false);
     const info = user.query?.userinfo as { anon?: boolean; id?: number } | undefined;
     if (!info || info.anon || !info.id)
-      throw new Error(
+      throw new SignInRejected(
         `Wiki sign-in failed: ${loginErrorMessage(html) ?? "the wiki did not accept the username or password"}`,
       );
   }
@@ -247,15 +274,20 @@ export class MediaWikiConnector implements WikiConnector {
 
   private async site(): Promise<SiteInfo> {
     if (this.session.site) return this.session.site;
-    const data = await this.api({ action: "query", meta: "siteinfo", siprop: "namespaces" });
+    const [data, modules] = await Promise.all([
+      this.api({ action: "query", meta: "siteinfo", siprop: "namespaces" }),
+      this.api({ action: "paraminfo", modules: EXTENDED_SEARCH_MODULE }),
+    ]);
     const namespaces = Object.values(
       (data.query?.namespaces ?? {}) as Record<string, { id: number }>,
     ).map((ns) => ns.id);
+    const paraminfo = (modules as { paraminfo?: { modules?: { name?: string }[] } }).paraminfo;
     this.session.site = {
       // Talk namespaces are odd; Special/Media are negative.
       searchNamespaces: namespaces.filter(
         (id) => id >= 0 && id % 2 === 0 && !NOISE_NAMESPACES.has(id),
       ),
+      extendedSearch: (paraminfo?.modules ?? []).some((m) => m.name === EXTENDED_SEARCH_MODULE),
     };
     return this.session.site;
   }
@@ -271,14 +303,20 @@ export class MediaWikiConnector implements WikiConnector {
     query: string,
     options: { limit?: number; namespaces?: readonly number[]; titlesOnly?: boolean } = {},
   ): Promise<WikiSearchHit[]> {
-    const namespaces = options.namespaces?.length
-      ? options.namespaces
-      : (await this.site()).searchNamespaces;
+    const limit = Math.min(Math.max(options.limit ?? 20, 1), 50);
+    const site = await this.site();
+    // Namespace and title filters are MediaWiki search features; without
+    // them BlueSpice's own search is preferred because it reads file contents.
+    if (site.extendedSearch && !options.namespaces?.length && !options.titlesOnly) {
+      const hits = await this.extendedSearch(query, limit);
+      if (hits) return hits;
+    }
+    const namespaces = options.namespaces?.length ? options.namespaces : site.searchNamespaces;
     const data = await this.api({
       action: "query",
       list: "search",
       srsearch: query,
-      srlimit: Math.min(Math.max(options.limit ?? 20, 1), 50),
+      srlimit: limit,
       srnamespace: namespaces.join("|"),
       srwhat: options.titlesOnly ? "title" : undefined,
       srprop: "snippet|timestamp|size",
@@ -303,6 +341,48 @@ export class MediaWikiConnector implements WikiConnector {
         url: await this.pageUrl(hit.title),
       })),
     );
+  }
+
+  /**
+   * BlueSpice ExtendedSearch (Elasticsearch/OpenSearch). Built like its
+   * SearchCenter: a JSON lookup with an AND query string. Returns undefined
+   * when the backend fails, so the caller falls back to MediaWiki search.
+   */
+  private async extendedSearch(query: string, limit: number): Promise<WikiSearchHit[] | undefined> {
+    const lookup = {
+      query: { bool: { must: [{ query_string: { query, default_operator: "AND" } }] } },
+      size: limit,
+      from: 0,
+    };
+    let data: ExtendedSearchResponse;
+    try {
+      data = await this.api({ action: EXTENDED_SEARCH_MODULE, q: JSON.stringify(lookup) });
+    } catch {
+      return undefined;
+    }
+    if (data.exception || !Array.isArray(data.results)) return undefined;
+    const results = data.results as readonly ExtendedSearchResult[];
+    const hits: WikiSearchHit[] = [];
+    for (const result of results) {
+      // Uploaded files ("repofile") come with their extracted text; external
+      // file shares and special pages are not reachable through this API.
+      const title =
+        result.type === "wikipage"
+          ? result.prefixed_title
+          : result.type === "repofile" && result.filename
+            ? `${result.namespace_text ?? "File"}:${result.filename}`
+            : undefined;
+      if (!title) continue;
+      const snippet = stripTags(result.highlight ?? result.rendered_content_snippet ?? "");
+      hits.push({
+        title,
+        namespace: result.namespace ?? (result.type === "repofile" ? 6 : 0),
+        snippet: snippet || undefined,
+        size: result.size,
+        url: await this.pageUrl(title),
+      });
+    }
+    return hits;
   }
 
   async readPage(
