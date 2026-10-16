@@ -6,6 +6,7 @@ import type { AccessMode } from "../config/index.js";
 import type { ConnectorRegistry } from "../connectors/index.js";
 import type { DocBulkMethod, DocDocument, DocumentConnector } from "../types/index.js";
 import { securePath, secureReadPath } from "../utils/path-sandbox.js";
+import { PDF_TO_MARKDOWN_SCRIPT } from "../utils/attachment-extract.js";
 import { collectProviderResults } from "./provider-orchestration.js";
 
 export class DocumentService {
@@ -55,11 +56,9 @@ export class DocumentService {
     const source = join(directory, `${String(id)}.pdf`);
     try {
       writeFileSync(source, await connector.downloadDocument(id));
-      return execFileSync(
-        "python3",
-        ["-c", "import pymupdf4llm,sys; print(pymupdf4llm.to_markdown(sys.argv[1]))", source],
-        { maxBuffer: 10 * 1024 * 1024 },
-      ).toString();
+      return execFileSync("python3", ["-c", PDF_TO_MARKDOWN_SCRIPT, source], {
+        maxBuffer: 10 * 1024 * 1024,
+      }).toString();
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

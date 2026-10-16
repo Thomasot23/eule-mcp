@@ -22,6 +22,24 @@ const TEXT_EXTS = new Set([
   ".srt",
 ]);
 
+/**
+ * PDF to Markdown via pymupdf4llm. PyMuPDF writes its notes ("Document parser
+ * messages", OCR hints) to file descriptor 1 directly, so fd 1 points at
+ * stderr while converting; only the Markdown reaches stdout.
+ */
+export const PDF_TO_MARKDOWN_SCRIPT = [
+  "import os, sys",
+  "stdout = os.dup(1)",
+  "os.dup2(2, 1)",
+  "try:",
+  "    import pymupdf4llm",
+  "    markdown = pymupdf4llm.to_markdown(sys.argv[1])",
+  "finally:",
+  "    sys.stdout.flush()",
+  "    os.dup2(stdout, 1)",
+  "sys.stdout.write(markdown)",
+].join("\n");
+
 export interface ExtractResult {
   text: string;
   /** How the text was produced: pymupdf4llm | pandoc | utf-8 | utf-8-fallback. */
@@ -49,15 +67,9 @@ export function extractAttachmentText(buf: Buffer, filename: string): ExtractRes
   try {
     writeFileSync(tmp, buf);
     if (isPdf) {
-      const out = execFileSync(
-        "python3",
-        [
-          "-c",
-          "import sys, pymupdf4llm; sys.stdout.write(pymupdf4llm.to_markdown(sys.argv[1]))",
-          tmp,
-        ],
-        { maxBuffer: 20 * 1024 * 1024 },
-      ).toString();
+      const out = execFileSync("python3", ["-c", PDF_TO_MARKDOWN_SCRIPT, tmp], {
+        maxBuffer: 20 * 1024 * 1024,
+      }).toString();
       return { text: out, method: "pymupdf4llm" };
     }
     if (pandocFormat) return { text: convertWithPandoc(tmp, pandocFormat), method: "pandoc" };
