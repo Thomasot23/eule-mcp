@@ -66,7 +66,7 @@ export function registerWikiTools(server: McpServer, wikis: WikiService): void {
           [
             ...r.values.map(
               (hit) =>
-                `- ${hit.title}${several ? ` [${hit.wiki}]` : ""}${date(hit.timestamp)}${hit.snippet ? `\n  ${hit.snippet}` : ""}`,
+                `- ${hit.title}${hit.redirectFrom ? ` (via ${hit.redirectFrom})` : ""}${several ? ` [${hit.wiki}]` : ""}${date(hit.timestamp)}${hit.snippet ? `\n  ${hit.snippet}` : ""}`,
             ),
             ...r.failures.map((f) => `⚠️ [${f.account}] ${f.message}`),
           ].join("\n") || "No wiki pages matched the search.",

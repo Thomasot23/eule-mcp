@@ -348,6 +348,8 @@ export interface WikiSearchHit {
   readonly timestamp?: string;
   readonly size?: number;
   readonly url: string;
+  /** The hit was a redirect with this title; `title` is its target. */
+  readonly redirectFrom?: string;
 }
 
 /** A wiki page rendered for reading. */

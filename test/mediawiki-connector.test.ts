@@ -146,6 +146,22 @@ function fakeWiki(
           results: [
             {
               type: "wikipage",
+              prefixed_title: "Reisekosten",
+              namespace: 0,
+              is_redirect: 1,
+              redirects_to: "Handbuch:Dienstreise",
+            },
+            {
+              type: "wikipage",
+              prefixed_title: "Alte Reiseordnung",
+              namespace: 0,
+              is_redirect: 1,
+              redirects_to: "Reiseordnung",
+            },
+            // The target follows its redirect without an excerpt of its own.
+            { type: "wikipage", prefixed_title: "Reiseordnung", namespace: 0 },
+            {
+              type: "wikipage",
               prefixed_title: "Handbuch:Dienstreise",
               namespace: 3000,
               namespace_text: "Handbuch",
@@ -458,6 +474,15 @@ describe("MediaWikiConnector on BlueSpice with ExtendedSearch", () => {
         snippet: "Antrag auf Dienstreise",
         size: undefined,
         url: `${ORIGIN}/w/index.php?title=Handbuch%3ADienstreise`,
+        redirectFrom: undefined,
+      },
+      {
+        title: "Reiseordnung",
+        namespace: 0,
+        snippet: undefined,
+        size: undefined,
+        url: `${ORIGIN}/w/index.php?title=Reiseordnung`,
+        redirectFrom: "Alte Reiseordnung",
       },
       {
         title: "Datei:Reiseantrag_2026.pdf",
@@ -465,6 +490,7 @@ describe("MediaWikiConnector on BlueSpice with ExtendedSearch", () => {
         snippet: "Formular für Dienstreisen & Kostenstelle",
         size: 52000,
         url: `${ORIGIN}/w/index.php?title=Datei%3AReiseantrag_2026.pdf`,
+        redirectFrom: undefined,
       },
     ]);
   });

@@ -7,7 +7,6 @@ import type {
   WikiPageRef,
   WikiSearchHit,
 } from "../../types/index.js";
-import { htmlToMarkdown } from "../../renderer/markdown-renderer.js";
 import { assertResponseSize, assertSecureUrl, fetchWithTimeout } from "../../utils/security.js";
 import {
   CookieJar,
@@ -18,6 +17,7 @@ import {
   sessionFetch,
   stripTags,
 } from "./session.js";
+import { wikiHtmlToMarkdown } from "./render.js";
 
 type Params = Record<string, string | number | boolean | undefined>;
 
@@ -55,6 +55,8 @@ interface ExtendedSearchResult {
   readonly highlight?: string;
   readonly rendered_content_snippet?: string;
   readonly size?: number;
+  readonly is_redirect?: boolean | number;
+  readonly redirects_to?: string;
 }
 
 interface ExtendedSearchResponse extends ApiResponse {
@@ -76,6 +78,16 @@ interface Session {
 
 /** The wiki refused the username or password (as opposed to an outage). */
 class SignInRejected extends Error {}
+
+/** An error the MediaWiki API reported, with its machine-readable code. */
+class WikiApiError extends Error {
+  constructor(
+    readonly code: string,
+    info?: string,
+  ) {
+    super(`Wiki API: ${info ?? code}`);
+  }
+}
 
 /** Sessions outlive connector objects, which the registry builds per call. */
 const sessions = new Map<string, Session>();
@@ -268,7 +280,7 @@ export class MediaWikiConnector implements WikiConnector {
       await this.signIn();
       data = await this.call(params, true);
     }
-    if (data.error) throw new Error(`Wiki API: ${data.error.info ?? data.error.code}`);
+    if (data.error) throw new WikiApiError(data.error.code, data.error.info);
     return data;
   }
 
@@ -362,27 +374,37 @@ export class MediaWikiConnector implements WikiConnector {
     }
     if (data.exception || !Array.isArray(data.results)) return undefined;
     const results = data.results as readonly ExtendedSearchResult[];
-    const hits: WikiSearchHit[] = [];
+    const hits = new Map<string, WikiSearchHit>();
     for (const result of results) {
       // Uploaded files ("repofile") come with their extracted text; external
       // file shares and special pages are not reachable through this API.
-      const title =
+      const found =
         result.type === "wikipage"
           ? result.prefixed_title
           : result.type === "repofile" && result.filename
             ? `${result.namespace_text ?? "File"}:${result.filename}`
             : undefined;
-      if (!title) continue;
+      if (!found) continue;
+      // BlueSpice lists a redirect as a hit of its own; report its target.
+      const redirect = result.is_redirect && result.redirects_to ? found : undefined;
+      const title = redirect ? (result.redirects_to ?? found) : found;
       const snippet = stripTags(result.highlight ?? result.rendered_content_snippet ?? "");
-      hits.push({
+      const hit: WikiSearchHit = {
         title,
         namespace: result.namespace ?? (result.type === "repofile" ? 6 : 0),
         snippet: snippet || undefined,
-        size: result.size,
+        size: redirect ? undefined : result.size,
         url: await this.pageUrl(title),
-      });
+        redirectFrom: redirect,
+      };
+      // The target itself replaces an earlier redirect hit, keeping its rank;
+      // without an excerpt of its own the redirect still explains the match.
+      const known = hits.get(title);
+      if (!known) hits.set(title, hit);
+      else if (known.redirectFrom && !redirect)
+        hits.set(title, { ...hit, redirectFrom: hit.snippet ? undefined : known.redirectFrom });
     }
-    return hits;
+    return [...hits.values()];
   }
 
   async readPage(
@@ -403,6 +425,10 @@ export class MediaWikiConnector implements WikiConnector {
       disableeditsection: true,
       disablelimitreport: true,
       section,
+    }).catch((error: unknown) => {
+      if (error instanceof WikiApiError && error.code === "missingtitle")
+        throw new Error(`Wiki page not found: ${title}`);
+      throw error;
     });
     const parsed = data.parse as {
       title: string;
@@ -430,7 +456,7 @@ export class MediaWikiConnector implements WikiConnector {
       timestamp: revision?.timestamp,
       url: await this.pageUrl(parsed.title),
       // Root-relative links would be dead outside the wiki.
-      content: htmlToMarkdown(
+      content: wikiHtmlToMarkdown(
         parsed.text.replace(/\b(href|src)="\/(?!\/)/g, `$1="${this.session.jar.origin}/`),
       ),
       format: "markdown",
