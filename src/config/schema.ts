@@ -17,6 +17,7 @@ export const CONNECTOR_KINDS = [
   "files",
   "documents",
   "tasks",
+  "booking",
 ] as const;
 
 export const CONNECTOR_TYPES = [
@@ -28,6 +29,8 @@ export const CONNECTOR_TYPES = [
   "signal",
   "google",
   "paperless",
+  "anny",
+  "anny-oauth",
 ] as const;
 
 export const CONFIG_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -63,6 +66,9 @@ export const connectorSchema = z
     url: z.url().optional(),
     token: z.string().optional(),
     signalCliUrl: z.url().optional(),
+    organization: z.string().trim().min(1).max(128).regex(CONFIG_ID_PATTERN).optional(),
+    access: z.enum(["admin", "customer"]).optional(),
+    clientId: z.string().trim().min(1).max(256).optional(),
   })
   .strict()
   .superRefine((connector, ctx) => {

@@ -43,6 +43,8 @@ domain interfaces/managers, not MCP types.
 - `contact-tools.ts` -> `ContactService` -> remote connectors/local manager
 - `file-tools.ts` -> `FileService` -> file connectors/sandboxed filesystem
 - `document-tools.ts` -> `DocumentService` -> document connectors
+- `booking-tools.ts` -> `BookingService` -> booking connectors (anny); writes
+  only through user-confirmed, single-use change plans
 - `calendar-tools.ts` -> `CalendarService` -> calendar connectors
 - `messenger-tools.ts` -> `MessengerService` -> messenger connectors
 - `mail-tools.ts` -> `MailService`/`AttachmentService` -> mail connectors

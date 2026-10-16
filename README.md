@@ -64,7 +64,7 @@ Eule is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) serve
 - **Role-based context** — map accounts and connectors to professional roles
 - **LLM-optimized output** — HTML emails rendered as clean Markdown with thread splitting
 
-## Tools (63)
+## Tools (78)
 
 ### 🔐 Auth (5)
 
@@ -120,7 +120,9 @@ Writes never pick an account on their own. `mail_send`, `mail_draft`,
 the accounts that would have been accepted. `contact_add` requires it as soon as
 a remote address book is configured (`local: true` stores locally). Document
 writes (`doc_upload`, `doc_tag`, `doc_bulk`) fail when the role leaves more than
-one writable Paperless instance.
+one writable Paperless instance. Booking tools need a role that leaves exactly
+one anny connector; a `readOnly` role can read and preview but never apply a
+booking change.
 
 > **Configuration validation:** startup now fails closed on unknown keys,
 > malformed or insecure URLs/ports, invalid IDs, unsupported connector/domain
@@ -258,22 +260,77 @@ Backends:
 | `doc_tag` | Update document metadata (title, tags, correspondent, type) |
 | `doc_bulk` | Bulk operations (add/remove tag, set type, delete, merge, reprocess) |
 
+### 🏢 Booking (15)
+
+Rooms, desks, equipment and their bookings on [anny](https://anny.co). Reads are
+free; **every change is a two-step plan that the user confirms**: `booking_change_plan`
+shows the exact request and the target's current state without sending anything,
+and only `booking_change_apply` executes it — once, within 15 minutes, and only for
+roles with write access. anny exposes side effects on `GET` routes (`…/cancel`,
+`…/send`, `…/set-paid`, `GET /order` creates a cart), so a call only counts as a read
+when it is a `GET` on an allowlist generated from anny's OpenAPI specs
+(`scripts/generate-anny-read-endpoints.mjs`).
+
+| Tool | Description |
+|---|---|
+| `booking_whoami` | Signed-in anny user/customer and organization — connection check |
+| `booking_list` | Bookings by date range, status, resource, service, search (customer access: own bookings) |
+| `booking_read` | One booking with resource, service, customer, order (admin) |
+| `booking_resources` | Rooms, desks, equipment |
+| `booking_services` | What can be booked, with rules |
+| `booking_customers` | Customer search (admin) |
+| `booking_orders` | Orders/checkouts (admin) |
+| `booking_availability` | Free slots: next date, dates in a range, start times on a date, booking rules |
+| `booking_api_get` | Any allowlisted read-only anny endpoint |
+| `booking_change_plan` | Preview a change — admin: accept/reject/cancel/check-in/check-out; customer: book/cancel (shows fee and refund); or a raw request |
+| `booking_change_apply` | Execute a confirmed plan **[WRITES anny]** |
+| `booking_change_list` | Pending plans |
+| `booking_change_discard` | Drop a pending plan |
+| `booking_login` | Sign in to anny (OAuth + PKCE through anny's own login and SSO) |
+| `booking_logout` | Forget the stored anny session |
+
+Two connector types select how Eule talks to anny:
+
+| Type | Who | Credential | `access` |
+|---|---|---|---|
+| `anny` | Team members with a personal access token (anny → Organization Settings → API) | Token in the OS credential store | `admin` (default) |
+| `anny-oauth` | Everyone with an anny login, incl. SSO users | Per-user sign-in with `booking_login` (OAuth + PKCE, redirect `http://127.0.0.1:8741/callback`); no client ID or support request needed | `customer` (default) or `admin` |
+
+`access: admin` uses the Admin API (all bookings of the organization, within the
+user's anny permissions); `access: customer` uses the Customer API (own bookings,
+booking and cancelling slots). The signed-in user only ever gets what their own
+anny account allows — the identity provider behind anny's SSO needs no change.
+
+`anny-oauth` needs no OAuth client from anny: on the first `booking_login`, Eule
+reads anny's OAuth metadata (`/.well-known/oauth-authorization-server`) and
+registers itself as a public PKCE client named "Eule" through anny's dynamic
+client registration (RFC 7591) — once per anny instance (`auth.anny.co`, or
+`auth.anny.eu` for the Gov-Cloud). The client ID is cached in
+`~/.eule/anny-tokens.json` and reused; if anny ever rejects it, Eule forgets it
+and the next sign-in registers a new one. An optional `clientId` on the
+connector overrides this with a client anny issued. Eule requests the scope `*`
+because its tools are not limited to one anny resource; it enforces its own
+limits instead (role permissions, the read-only endpoint allowlist, confirmed
+change plans), and the token never exceeds the user's own anny rights.
+
 ## Provider Matrix
 
-| | Mail | Calendar | Contacts | Tasks | Chat | Files | Documents |
-|---|---|---|---|---|---|---|---|
-| **M365 Graph** | ✅ rw | ✅ rw | ✅ rw | ✅ rw¹ | ✅ Teams | ✅ rw | — |
-| **M365 EWS** | ✅ rw | ✅ rw | ✅ rw | — | — | — | — |
-| **Google** | ✅ rw | ✅ rw | ✅ rw | — | — | ✅ rw | — |
-| **IMAP/SMTP** | ✅ rw | — | — | — | — | — | — |
-| **CalDAV** | — | ✅ rw | — | ✅ rw² | — | — | — |
-| **CardDAV** | — | — | ✅ rw | — | — | — | — |
-| **iCal Feed** | — | ro | — | — | — | — | — |
-| **Signal** | — | — | — | — | ✅ rw | — | — |
-| **Paperless-NGX** | — | — | — | — | — | — | ✅ rw |
+| | Mail | Calendar | Contacts | Tasks | Chat | Files | Documents | Booking |
+|---|---|---|---|---|---|---|---|---|
+| **M365 Graph** | ✅ rw | ✅ rw | ✅ rw | ✅ rw¹ | ✅ Teams | ✅ rw | — | — |
+| **M365 EWS** | ✅ rw | ✅ rw | ✅ rw | — | — | — | — | — |
+| **Google** | ✅ rw | ✅ rw | ✅ rw | — | — | ✅ rw | — | — |
+| **IMAP/SMTP** | ✅ rw | — | — | — | — | — | — | — |
+| **CalDAV** | — | ✅ rw | — | ✅ rw² | — | — | — | — |
+| **CardDAV** | — | — | ✅ rw | — | — | — | — | — |
+| **iCal Feed** | — | ro | — | — | — | — | — | — |
+| **Signal** | — | — | — | — | ✅ rw | — | — | — |
+| **Paperless-NGX** | — | — | — | — | — | — | ✅ rw | — |
+| **anny** | — | — | — | — | — | — | — | ✅ rw³ |
 
 ¹ Microsoft To Do; requires the opt-in `Tasks.ReadWrite` scope.
 ² VTODO collections: Apple Reminders (iCloud), Nextcloud Tasks.
+³ Writes only through a user-confirmed change plan (`booking_change_plan` → `booking_change_apply`).
 
 ## Quickstart
 
@@ -542,6 +599,19 @@ roles:
           account: "paperless.local"
           url: "https://paperless.example.com"
           credentialRef: "connector/personal/documents/paperless.a1b2c3d4"
+      booking:
+        # Team member with a personal access token from anny's admin dashboard:
+        - id: anny
+          type: anny
+          account: "example-org"
+          credentialRef: "connector/personal/booking/anny.a1b2c3d4"
+        # …or per-user sign-in (incl. SSO); Eule registers its own OAuth client:
+        # - id: anny
+        #   type: anny-oauth
+        #   account: "example-org"
+        #   clientId: "<client id from anny>"   # optional override
+        #   access: customer            # or admin
+        #   organization: "example-org"   # slug; customer access lists resources by it
 ```
 
 IMAP connectors file a copy of every sent message in the server's Sent folder,
@@ -722,6 +792,7 @@ of fully headless authentication.
 - [x] CalDAV/CardDAV provider (iCloud, Nextcloud, any CalDAV/CardDAV server)
 - [x] iCal feed subscriptions (read-only calendar feeds)
 - [ ] Resource planning & capacity tracking
+- [x] anny booking connector (rooms/resources; admin and customer access, confirmed writes)
 - [x] Paperless-ngx connector
 - [ ] Apple Notes (macOS-only, AppleScript/SQLite)
 - [ ] Messengers — iMessage (macOS), WhatsApp (Business API), Telegram, Discord, Slack, Matrix

@@ -35,6 +35,9 @@ export interface ConnectorConfigureInput {
   readonly sentMailbox?: string;
   readonly url?: string;
   readonly signalCliUrl?: string;
+  readonly organization?: string;
+  readonly access?: "admin" | "customer";
+  readonly clientId?: string;
 }
 
 export interface TotpConfigureOptions {
@@ -111,6 +114,9 @@ export class ConfigurationControlService {
       ...(input.sentMailbox ? { sentMailbox: input.sentMailbox } : {}),
       ...(input.url ? { url: input.url } : {}),
       ...(input.signalCliUrl ? { signalCliUrl: input.signalCliUrl } : {}),
+      ...(input.organization ? { organization: input.organization } : {}),
+      ...(input.access ? { access: input.access } : {}),
+      ...(input.clientId ? { clientId: input.clientId } : {}),
       ...(input.type === "imap" ? { auth: "password" as const } : {}),
     });
     const capability = assertConnectorCapability(input.kind, base);

@@ -6,6 +6,7 @@ import type {
   FileConnector,
   DocumentConnector,
   TaskConnector,
+  BookingConnector,
   RoleConfig,
   ConnectorConfig,
 } from "../types/index.js";
@@ -35,6 +36,7 @@ import { GoogleCalendarConnector } from "../providers/google/google-calendar.js"
 import { GoogleContactConnector } from "../providers/google/google-contacts.js";
 import { GoogleDriveConnector } from "../providers/google/google-drive.js";
 import { PaperlessConnector } from "../providers/paperless/index.js";
+import { AnnyConnector, annyOAuthTokenSource } from "../providers/anny/index.js";
 import { RolePolicyService, type AccessMode } from "../config/index.js";
 import { ConfiguredCredentialResolver } from "../helper/configured-credential-resolver.js";
 
@@ -460,4 +462,79 @@ export class ConnectorRegistry {
     }
     return connectors;
   }
+
+  /** Get all booking connectors (anny), optionally filtered by role. */
+  getBookingConnectors(role?: string, mode: AccessMode = "read"): BookingConnector[] {
+    const locale = this.config.get().language === "en" ? "en-US" : "de-DE";
+    const connectors: BookingConnector[] = [];
+    const roles = this.policy.select(role, "booking", mode);
+    for (const r of roles) {
+      for (const bc of r.connectors.booking ?? []) {
+        const common = {
+          ...(bc.url ? { baseUrl: bc.url } : {}),
+          ...(bc.organization ? { organization: bc.organization } : {}),
+          locale,
+        };
+        if (bc.type === "anny") {
+          const token = this.secrets.connector(bc);
+          if (!token) continue;
+          connectors.push(
+            new AnnyConnector(bc.account || bc.id, () => Promise.resolve(token), {
+              ...common,
+              access: bc.access ?? "admin",
+            }),
+          );
+        } else if (bc.type === "anny-oauth") {
+          // Listed even before sign-in, so calls explain how to sign in instead
+          // of reporting that no connector exists.
+          connectors.push(
+            new AnnyConnector(
+              bc.account || bc.id,
+              annyOAuthTokenSource(annyTokenKey(r.id, bc.id), bc.url),
+              {
+                ...common,
+                access: bc.access ?? "customer",
+                signInHint: `Sign in to anny with booking_login (role "${r.id}").`,
+              },
+            ),
+          );
+        }
+      }
+    }
+    return connectors;
+  }
+
+  /** "anny-oauth" connectors a user can sign in to, with their token-store keys. */
+  getBookingSignInTargets(role?: string): BookingSignInTarget[] {
+    const targets: BookingSignInTarget[] = [];
+    for (const r of this.policy.select(role, "booking", "read")) {
+      for (const bc of r.connectors.booking ?? []) {
+        if (bc.type === "anny-oauth")
+          targets.push({
+            role: r.id,
+            connectorId: bc.id,
+            account: bc.account || bc.id,
+            key: annyTokenKey(r.id, bc.id),
+            ...(bc.clientId ? { clientId: bc.clientId } : {}),
+            ...(bc.url ? { baseUrl: bc.url } : {}),
+          });
+      }
+    }
+    return targets;
+  }
+}
+
+/** Token-store key of an "anny-oauth" connector. */
+export function annyTokenKey(role: string, connectorId: string): string {
+  return `${role}/${connectorId}`;
+}
+
+export interface BookingSignInTarget {
+  readonly role: string;
+  readonly connectorId: string;
+  readonly account: string;
+  readonly key: string;
+  /** Client ID override; without it Eule uses the client it registered at anny. */
+  readonly clientId?: string;
+  readonly baseUrl?: string;
 }

@@ -2,7 +2,16 @@
 export interface ConnectorConfig {
   readonly id: string;
   readonly type:
-    "m365" | "imap" | "caldav" | "carddav" | "ical" | "signal" | "google" | "paperless";
+    | "m365"
+    | "imap"
+    | "caldav"
+    | "carddav"
+    | "ical"
+    | "signal"
+    | "google"
+    | "paperless"
+    | "anny"
+    | "anny-oauth";
   readonly account: string;
   /** For shared/delegate mailboxes. Auth uses `account`, access targets `mailbox`. */
   readonly mailbox?: string;
@@ -29,6 +38,18 @@ export interface ConnectorConfig {
   readonly url?: string;
   // Paperless-NGX fields (type: "paperless").
   readonly token?: string;
+  /** anny organization (types "anny"/"anny-oauth"). With admin access the
+   *  organization UUID, sent as `?o=` when the token spans several
+   *  organizations; with customer access the organization slug, needed to
+   *  list its resources and services. */
+  readonly organization?: string;
+  /** anny API surface: "admin" (team member, Admin API) or "customer" (people
+   *  who book, Customer API). Default "admin" for "anny", "customer" for
+   *  "anny-oauth". */
+  readonly access?: "admin" | "customer";
+  /** OAuth client ID anny issued for Eule (type "anny-oauth"). Optional:
+   *  without it Eule registers its own client at anny (RFC 7591). */
+  readonly clientId?: string;
   // Signal fields (type: "signal").
   readonly signalCliUrl?: string;
 }
@@ -68,6 +89,8 @@ export interface RoleConnectors {
   /** Task backends: Microsoft To Do via Graph, or VTODO over CalDAV
    *  (Apple Reminders, Nextcloud Tasks). */
   readonly tasks?: readonly ConnectorConfig[];
+  /** Booking platforms (anny): rooms, desks, equipment and their bookings. */
+  readonly booking?: readonly ConnectorConfig[];
 }
 
 /** A single role definition. */

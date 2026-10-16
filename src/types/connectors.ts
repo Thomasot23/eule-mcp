@@ -393,3 +393,110 @@ export interface TaskConnector {
   updateTask(id: string, updates: RemoteTaskUpdate): Promise<RemoteTask>;
   deleteTask(id: string): Promise<void>;
 }
+
+export type BookingHttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
+
+/** Admin API (team members) or Customer API (people who book, own bookings only). */
+export type BookingAccess = "admin" | "customer";
+
+export type BookingQueryScalar = string | number | boolean;
+export type BookingQueryValue = BookingQueryScalar | readonly BookingQueryScalar[];
+export type BookingQuery = Readonly<Record<string, BookingQueryValue | undefined>>;
+
+/** One HTTP call against a booking platform API, path relative to the API host. */
+export interface BookingApiRequest {
+  readonly method: BookingHttpMethod;
+  readonly path: string;
+  readonly query?: BookingQuery;
+  readonly body?: unknown;
+}
+
+export interface BookingApiResponse {
+  readonly status: number;
+  readonly body: unknown;
+}
+
+/** A JSON:API resource flattened to `{ type, id, ...attributes, relationships }`. */
+export interface BookingRecord {
+  readonly type: string;
+  readonly id: string;
+  readonly [key: string]: unknown;
+}
+
+export interface BookingPage {
+  readonly data: BookingRecord[];
+  readonly total?: number;
+  readonly page?: number;
+  readonly lastPage?: number;
+}
+
+export interface BookingListFilter {
+  /** Preset such as `today`, `next_7_days`, or `YYYY-MM-DD:YYYY-MM-DD`. */
+  readonly range?: string;
+  readonly rangeField?: "start" | "end" | "period" | "created";
+  readonly status?: readonly string[];
+  readonly resources?: readonly string[];
+  readonly services?: readonly string[];
+  readonly search?: string;
+  readonly email?: string;
+  readonly hideBlockers?: boolean;
+  readonly include?: string;
+  readonly sort?: string;
+  readonly page?: number;
+  readonly pageSize?: number;
+}
+
+export interface BookingListOptions {
+  readonly search?: string;
+  readonly include?: string;
+  readonly sort?: string;
+  readonly page?: number;
+  readonly pageSize?: number;
+  readonly filter?: Readonly<Record<string, BookingQueryValue | undefined>>;
+}
+
+export interface BookingAvailabilityQuery {
+  readonly serviceId: string;
+  readonly resourceId?: string;
+  /** `start` lists start times on `date`; `start-dates` lists dates between `startDate` and `endDate`. */
+  readonly kind: "start" | "start-dates" | "next-date" | "service-configuration";
+  readonly date?: string;
+  readonly startDate?: string;
+  readonly endDate?: string;
+  readonly duration?: number;
+}
+
+/**
+ * Booking platform connector (anny). Reads go through typed methods or `get`;
+ * `send` is the only way to change data and is reached solely from a change
+ * plan the user confirmed (see BookingService).
+ */
+export interface BookingConnector {
+  readonly account: string;
+  readonly tier: string;
+  readonly access: BookingAccess;
+  get(path: string, query?: BookingQuery): Promise<unknown>;
+  send(request: BookingApiRequest): Promise<BookingApiResponse>;
+  whoami(): Promise<{ user: BookingRecord | null; organization: BookingRecord | null }>;
+  listBookings(filter: BookingListFilter): Promise<BookingPage>;
+  getBooking(id: string, include?: string): Promise<BookingRecord>;
+  listResources(options: BookingListOptions): Promise<BookingPage>;
+  listServices(options: BookingListOptions): Promise<BookingPage>;
+  listCustomers(options: BookingListOptions): Promise<BookingPage>;
+  listOrders(options: BookingListOptions): Promise<BookingPage>;
+  availability(query: BookingAvailabilityQuery): Promise<unknown>;
+}
+
+/** A previewed booking-platform write waiting for the user's confirmation. */
+export interface BookingChangePlan {
+  readonly id: string;
+  /** Connector account and role the plan was made for; apply re-checks both. */
+  readonly account: string;
+  readonly role?: string;
+  readonly request: BookingApiRequest;
+  readonly title: string;
+  /** Current state of the targeted record, when it could be read. */
+  readonly before?: unknown;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+}

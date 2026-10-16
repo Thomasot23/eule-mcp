@@ -11,6 +11,9 @@ const CONFIGURABLE_FIELDS = [
   "sentMailbox",
   "url",
   "signalCliUrl",
+  "organization",
+  "access",
+  "clientId",
 ] as const satisfies readonly (keyof ConnectorConfig)[];
 
 export interface ConnectorCapability {
@@ -21,7 +24,7 @@ export interface ConnectorCapability {
   readonly optionalFieldsByKind?: Partial<
     Record<ConnectorKind, readonly (keyof ConnectorConfig)[]>
   >;
-  readonly nextStep?: "auth_login_m365" | "google_oauth_then_auth_login";
+  readonly nextStep?: "auth_login_m365" | "google_oauth_then_auth_login" | "booking_login";
 }
 
 /** SSOT for valid connector/domain combinations and required local configuration. */
@@ -83,6 +86,24 @@ export const CONNECTOR_CAPABILITIES: Readonly<
     requiredFields: ["url"],
     optionalFields: [],
   },
+  // anny.co booking platform. `url` defaults to https://b.anny.co
+  // (https://b.anny.eu for anny's Gov-Cloud). "anny" uses a personal access
+  // token from anny's admin dashboard; "anny-oauth" signs each user in through
+  // anny (and anny's SSO). Eule registers its own OAuth client at anny
+  // (dynamic client registration); `clientId` overrides it with an issued one.
+  anny: {
+    kinds: ["booking"],
+    credential: "token",
+    requiredFields: [],
+    optionalFields: ["url", "organization", "access"],
+  },
+  "anny-oauth": {
+    kinds: ["booking"],
+    credential: "none",
+    requiredFields: [],
+    optionalFields: ["url", "organization", "access", "clientId"],
+    nextStep: "booking_login",
+  },
 };
 
 export function assertConnectorCapability(
@@ -114,6 +135,9 @@ export function assertConnectorCapability(
     throw new Error(`Connector type "${connector.type}" requires a token, not a password`);
   if (connector.type === "imap" && connector.auth && connector.auth !== "password")
     throw new Error('Generic IMAP connectors support only auth="password"');
+  // anny issues personal access tokens only to team members; customers sign in.
+  if (connector.type === "anny" && connector.access === "customer")
+    throw new Error('Customer access to anny needs type "anny-oauth" (per-user sign-in)');
   if (connector.type !== "imap" && connector.auth)
     throw new Error(`Connector type "${connector.type}" does not support "auth"`);
   if (connector.url) assertSecureUrl(connector.url, `${connector.type} URL`);

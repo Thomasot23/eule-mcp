@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { ConfigManager } from "../config/index.js";
 import { DatabaseManager, ContactManager } from "../db/index.js";
 import {
+  BookingService,
   ConfigService,
   ConfigurationControlService,
   CalendarService,
@@ -18,6 +19,7 @@ import {
   updateNotice,
 } from "../services/index.js";
 import { registerAuthTools } from "../tools/auth-tools.js";
+import { registerBookingTools } from "../tools/booking-tools.js";
 import { registerConfigTools } from "../tools/config-tools.js";
 import { registerConfigurationControlTools } from "../tools/configuration-control-tools.js";
 import { registerCalendarTools } from "../tools/calendar-tools.js";
@@ -88,6 +90,7 @@ registerTaskTools(server, new TaskService(registry));
 const contactManager = new ContactManager(dbManager);
 registerContactTools(server, new ContactService(registry, contactManager));
 registerDocumentTools(server, new DocumentService(registry));
+registerBookingTools(server, new BookingService(registry));
 
 // --- Server startup ---
 

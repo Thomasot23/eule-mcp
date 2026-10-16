@@ -31,6 +31,26 @@ const connectorInputSchema = {
     .describe("IMAP: mailbox path for sent mail, if the server does not flag the right one"),
   url: z.url().optional(),
   signalCliUrl: z.url().optional(),
+  organization: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe(
+      "anny: organization UUID (admin access, only if the token spans several organizations) or organization slug (customer access)",
+    ),
+  access: z
+    .enum(["admin", "customer"])
+    .optional()
+    .describe("anny: admin = Admin API (team members), customer = Customer API (people who book)"),
+  clientId: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe(
+      "anny-oauth: OAuth client ID issued by anny. Optional — without it Eule registers its own client at anny on first sign-in",
+    ),
 } as const;
 
 export function registerConfigurationControlTools(

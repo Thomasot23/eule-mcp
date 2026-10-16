@@ -24,11 +24,18 @@ within a few days.
   CLI are stored in macOS Keychain,
   Windows Credential Manager, or Linux Secret Service; YAML retains only opaque,
   scoped references. Legacy inline secrets remain supported for migration.
-  `~/.eule` is `0700`, while `config.yaml` and `tokens.json` are atomically
-  written `0600`. OAuth access/refresh tokens remain permission-protected in
-  `tokens.json`, not encrypted by the OS credential store.
-- **TLS enforced for credentialed connectors.** CalDAV, CardDAV and Paperless
-  URLs must be `https://` (loopback `http://` is allowed for local tools). SMTP
+  `~/.eule` is `0700`, while `config.yaml`, `tokens.json` and `anny-tokens.json`
+  are atomically written `0600`. OAuth access/refresh tokens remain
+  permission-protected in those files, not encrypted by the OS credential store.
+  anny sessions live in their own file so an SSO login with the same e-mail
+  address cannot overwrite a Microsoft 365 token. The same file caches the
+  public OAuth client ID Eule registers at anny (RFC 7591 dynamic client
+  registration, `token_endpoint_auth_method: none`, PKCE S256); it is not a
+  secret. Endpoints from anny's OAuth metadata are accepted only if they are
+  `https://` on the auth origin itself, so a tampered metadata document cannot
+  redirect authorization codes or tokens to another host.
+- **TLS enforced for credentialed connectors.** CalDAV, CardDAV, Paperless and
+  anny URLs must be `https://` (loopback `http://` is allowed for local tools). SMTP
   uses `requireTLS` so a stripped-STARTTLS MITM cannot downgrade to cleartext.
 - **Filesystem sandbox.** Downloads may only be written under
   `~/.eule/<subdir>`, `~/Downloads`, `~/Documents`, `~/Desktop`, or the
