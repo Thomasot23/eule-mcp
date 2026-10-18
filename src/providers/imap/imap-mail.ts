@@ -287,7 +287,8 @@ async function findSpecialMailbox(
 /** Number of messages in a mailbox, or -1 if the server will not say. */
 async function messageCount(client: ImapFlow, path: string): Promise<number> {
   try {
-    return (await client.status(path, { messages: true })).messages ?? -1;
+    const status = await client.status(path, { messages: true });
+    return status === false ? -1 : (status.messages ?? -1);
   } catch {
     return -1;
   }
@@ -321,11 +322,18 @@ interface ImapSummary {
   uid: number;
   envelope?: {
     subject?: string;
-    date?: Date;
+    date?: Date | string;
     from?: { address?: string }[];
     to?: { address?: string }[];
   };
   flags?: Set<string>;
+}
+
+/** ImapFlow may preserve an envelope's date header as a string. */
+function envelopeDate(date: Date | string | undefined): string {
+  if (date === undefined) return "";
+  const parsed = typeof date === "string" ? new Date(date) : date;
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
 }
 
 export class ImapMailConnector implements MailConnector {
@@ -369,7 +377,7 @@ export class ImapMailConnector implements MailConnector {
       subject: message.envelope?.subject ?? "",
       from: message.envelope?.from?.[0]?.address ?? "",
       to: (message.envelope?.to ?? []).map((address) => address.address ?? ""),
-      receivedAt: message.envelope?.date?.toISOString() ?? "",
+      receivedAt: envelopeDate(message.envelope?.date),
       snippet: "",
       isRead: message.flags?.has("\\Seen") ?? false,
     };
@@ -481,7 +489,7 @@ export class ImapMailConnector implements MailConnector {
           bodyStructure?: BodyStructureNode;
           envelope?: {
             subject?: string;
-            date?: Date;
+            date?: Date | string;
             from?: { address?: string }[];
             to?: { address?: string }[];
             messageId?: string;
@@ -496,6 +504,7 @@ export class ImapMailConnector implements MailConnector {
         let bodyType: "html" | "text" = "text";
         if (picked) {
           const part = await client.download(String(uid), picked.part, { uid: true });
+          if (!part.content) throw new Error(`Message body for ${id} not found`);
           textBody = (await readCapped(part.content, "Message body")).toString("utf8");
           bodyType = picked.bodyType;
         } else {
@@ -516,7 +525,7 @@ export class ImapMailConnector implements MailConnector {
             subject: msg.envelope?.subject ?? "",
             from: msg.envelope?.from?.[0]?.address ?? "",
             to: (msg.envelope?.to ?? []).map((a) => a.address ?? ""),
-            receivedAt: msg.envelope?.date?.toISOString() ?? "",
+            receivedAt: envelopeDate(msg.envelope?.date),
             snippet: snippetOf(textBody, bodyType),
             isRead: msg.flags?.has("\\Seen") ?? false,
             body: textBody,
@@ -544,6 +553,7 @@ export class ImapMailConnector implements MailConnector {
       const lock = await client.getMailboxLock(mailbox);
       try {
         const part = await client.download(String(uid), attachmentId, { uid: true });
+        if (!part.content) throw new Error(`Attachment ${attachmentId} not found`);
         return await readCapped(part.content, "Attachment");
       } finally {
         lock.release();
@@ -679,7 +689,8 @@ export class ImapMailConnector implements MailConnector {
       const client = await this.connect();
       try {
         const mailbox = await this.specialMailbox(client, "\\Sent");
-        await client.append(mailbox, raw, ["\\Seen"]);
+        const result = await client.append(mailbox, raw, ["\\Seen"]);
+        if (!result) throw new Error("IMAP APPEND did not save the sent copy");
         return {};
       } finally {
         await client.logout();
@@ -766,10 +777,8 @@ export class ImapMailConnector implements MailConnector {
     try {
       const drafts = await this.specialMailbox(client, "\\Drafts");
       const result = await client.append(drafts, Buffer.from(mime), ["\\Draft", "\\Seen"]);
-      const uid =
-        result && typeof result === "object"
-          ? Number((result as unknown as Record<string, unknown>).uid) || 0
-          : 0;
+      if (!result) throw new Error("IMAP APPEND did not create the draft");
+      const uid = Number(result.uid) || 0;
       return {
         id: uid ? formatImapId(drafts, uid) : "",
         account: this.account,

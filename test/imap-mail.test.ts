@@ -488,8 +488,18 @@ describe("ImapMailConnector Sent copy", () => {
   function client(mailboxes: Listing, counts: Record<string, number> = {}) {
     return {
       list: vi.fn(async () => listed(mailboxes)),
-      status: vi.fn(async (path: string) => ({ messages: counts[path] ?? 0 })),
-      append: vi.fn(async (_mailbox: string, _raw: Buffer, _flags: string[]) => ({ uid: 7 })),
+      status: vi.fn(async (path: string): Promise<{ messages: number } | false> => ({
+        messages: counts[path] ?? 0,
+      })),
+      append: vi.fn(
+        async (
+          _mailbox: string,
+          _raw: Buffer,
+          _flags: string[],
+        ): Promise<{ uid: number } | false> => ({
+          uid: 7,
+        }),
+      ),
       mailboxOpen: vi.fn(async () => undefined),
       fetchOne: vi.fn(async () => ({ source: Buffer.from("Subject: draft\r\n\r\nbody") })),
       messageFlagsAdd: vi.fn(async () => undefined),
@@ -587,6 +597,14 @@ describe("ImapMailConnector Sent copy", () => {
     expect(imap.append.mock.calls[0]?.[0]).toBe("Gesendet");
   });
 
+  it("selects a known Sent count when another mailbox rejects STATUS", async () => {
+    const imap = client([{ path: "Gesendet", specialUse: "\\Sent" }, { path: "Sent" }]);
+    imap.status.mockResolvedValueOnce(false).mockResolvedValueOnce({ messages: 12 });
+    const { connector } = sending(imap);
+    await connector.sendMessage(["to@example.com"], "Hi", "Body");
+    expect(imap.append.mock.calls[0]?.[0]).toBe("Sent");
+  });
+
   it("files in a configured sentMailbox even where the server flags another", async () => {
     const imap = client([{ path: "Sent", flags: ["\\Sent"] }, { path: "Ausgang" }]);
     const { connector } = sending(imap, "smtp.mail.me.com", undefined, "Ausgang");
@@ -622,6 +640,29 @@ describe("ImapMailConnector Sent copy", () => {
 
     expect(sendMail).toHaveBeenCalledOnce();
     expect(receipt.warning).toMatch(/Sent folder: quota exceeded/);
+  });
+
+  it("reports an unsuccessful APPEND as a Sent copy warning", async () => {
+    const imap = client([{ path: "Sent", specialUse: "\\Sent" }]);
+    imap.append.mockResolvedValueOnce(false);
+    const { connector, sendMail } = sending(imap);
+
+    const receipt = await connector.sendMessage(["to@example.com"], "Hi", "Body");
+
+    expect(sendMail).toHaveBeenCalledOnce();
+    expect(receipt.warning).toMatch(/APPEND did not save/);
+    expect(imap.logout).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an unsuccessful draft APPEND instead of returning a successful draft", async () => {
+    const imap = client([{ path: "Drafts", specialUse: "\\Drafts" }]);
+    imap.append.mockResolvedValueOnce(false);
+    const { connector } = sending(imap);
+
+    await expect(connector.createDraft(["to@example.com"], "Hi", "Body")).rejects.toThrow(
+      /APPEND did not create/,
+    );
+    expect(imap.logout).toHaveBeenCalledOnce();
   });
 
   it("files a sent draft in the special-use Sent mailbox, not a literal 'Sent'", async () => {
