@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.2](https://github.com/metaneutrons/eule-mcp/compare/v0.10.1...v0.10.2) (2026-10-18)
+
+
+### Bug Fixes
+
+* **deps:** patch rustls security advisories ([#116](https://github.com/metaneutrons/eule-mcp/issues/116)) ([5828edd](https://github.com/metaneutrons/eule-mcp/commit/5828eddd0216828b770e057bcee8b8f8f8462472))
+* **imap:** upgrade ImapFlow to 2.4.0 ([#94](https://github.com/metaneutrons/eule-mcp/issues/94)) ([873305f](https://github.com/metaneutrons/eule-mcp/commit/873305fca49b3c5b35129b93deaec674c9f659b2))
+* **m365:** send mail from graph accounts over SMTP like Thunderbird ([#118](https://github.com/metaneutrons/eule-mcp/issues/118)) ([70d0e8d](https://github.com/metaneutrons/eule-mcp/commit/70d0e8ddbc15bf442d55905fd250651df8b9f9d6))
+
 ## [0.10.1](https://github.com/metaneutrons/eule-mcp/compare/v0.10.0...v0.10.1) (2026-10-13)
 
 

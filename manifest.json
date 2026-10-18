@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "eule-mcp",
   "display_name": "eule-mcp",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "Office assistant: e-mail, calendar, tasks, contacts and documents across M365, Google, IMAP/SMTP, CalDAV/CardDAV and Paperless.",
   "long_description": "Eule connects Claude to your mail, calendar, tasks, contacts and documents. Configuration and the local database live in ~/.eule; secrets stay in the OS credential store. The bundle ships the platform-native eule-helper used for webview logins and secret prompts.",
   "author": {
