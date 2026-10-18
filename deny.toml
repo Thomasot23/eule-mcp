@@ -8,6 +8,12 @@ version = 2
 yanked = "warn"
 ignore = [
   { id = "RUSTSEC-2024-0370", reason = "Transitive GTK/WebKit dependency; upstream offers no safe upgrade yet. Revisit when gtk-rs removes proc-macro-error." },
+  # The current Linux Secret Service backend requires zbus 5. These crates
+  # moved into zbus 6; this is a maintenance notice, not a vulnerability.
+  # Remove these entries when secret-service and its keyring backend use zbus 6.
+  { id = "RUSTSEC-2026-0370", reason = "zvariant is pulled in by the Linux keyring backend through secret-service and zbus 5; remove when the backend migrates to zbus 6." },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names is pulled in by the Linux keyring backend through secret-service and zbus 5; remove when the backend migrates to zbus 6." },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive is pulled in by the Linux keyring backend through secret-service and zbus 5; remove when the backend migrates to zbus 6." },
 ]
 
 [licenses]
