@@ -2,6 +2,7 @@ export {
   authenticateAccount,
   authenticateAccountDeviceCode,
   getAccessToken,
+  getAccessTokenForTier,
   refreshAccessToken,
   loadTokens,
   saveTokens,

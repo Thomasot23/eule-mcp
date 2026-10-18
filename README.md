@@ -152,6 +152,12 @@ one writable Paperless instance.
 > EWS fallback tier, attach via a new message or draft instead.
 > `mail_send` and `mail_send_draft` accept an optional `idempotency_key` to
 > prevent duplicate submission within the running server process.
+> On the **Graph tier** of a Microsoft 365 account, sending goes over SMTP with
+> OAuth (`smtp.office365.com`), as in Thunderbird, because the Graph token of a
+> Thunderbird-style client registration carries no `Mail.Send`. The SMTP token is
+> minted from the stored refresh token, so no second login is needed. This needs
+> `SMTP.Send` consent on the client registration and SMTP AUTH enabled for the
+> mailbox.
 
 > **Bulk updates.** `mail_update` takes either `id` or `ids` (up to 200) and
 > applies the same action to all of them in one call. The result names the

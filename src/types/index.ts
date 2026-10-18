@@ -30,6 +30,7 @@ export type {
   ChatMessage,
   FileResult,
   MailConnector,
+  RawMailSubmitter,
   MailSendOpts,
   SendReceipt,
   CalendarConnector,

@@ -13,7 +13,7 @@ import type { ConfigManager } from "../config/index.js";
 import type { M365Reauth } from "../auth/m365-reauth.js";
 import type { OAuthConfig } from "../types/index.js";
 import { logger } from "../utils/logger.js";
-import { loadTokens, getAccessToken } from "../providers/m365/index.js";
+import { loadTokens, getAccessToken, getAccessTokenForTier } from "../providers/m365/index.js";
 import { GraphMailConnector } from "../providers/m365/graph-mail.js";
 import { EwsMailConnector } from "../providers/m365/ews-mail.js";
 import { ImapMailConnector } from "../providers/imap/index.js";
@@ -55,6 +55,26 @@ export class ConnectorRegistry {
   private m365Token(account: string, oauth: OAuthConfig): () => Promise<string | null> {
     const getToken = () => getAccessToken(account, oauth);
     return this.reauth ? this.reauth.tokenSource(account, getToken) : getToken;
+  }
+
+  /**
+   * SMTP submission for a Graph-tier account, the way Thunderbird sends.
+   *
+   * The Graph token of Thunderbird's app registration reads and writes mail but
+   * cannot send, because Graph's send actions need `Mail.Send`. The Exchange
+   * Online resource of the same registration carries `SMTP.Send`, so a token for
+   * it is minted from the account's own sign-in (no second login). Only the
+   * submission is used; the connector never opens a mailbox here.
+   */
+  private smtpSubmitter(account: string, oauth: OAuthConfig): ImapMailConnector {
+    const getToken = () => getAccessTokenForTier(account, "imap", oauth);
+    return new ImapMailConnector(account, {
+      account,
+      host: "outlook.office365.com",
+      smtpHost: "smtp.office365.com",
+      auth: "oauth",
+      getToken: this.reauth ? this.reauth.tokenSource(account, getToken) : getToken,
+    });
   }
 
   /** Get all mail connectors, optionally filtered by role. */
@@ -107,7 +127,14 @@ export class ConnectorRegistry {
 
         switch (token.tier) {
           case "graph":
-            connectors.push(new GraphMailConnector(target, getToken, isShared));
+            connectors.push(
+              new GraphMailConnector(
+                target,
+                getToken,
+                isShared,
+                this.smtpSubmitter(mc.account, oauth),
+              ),
+            );
             break;
           case "ews":
             connectors.push(new EwsMailConnector(target, getToken, isShared));
@@ -200,7 +227,12 @@ export class ConnectorRegistry {
 
     switch (token.tier) {
       case "graph":
-        return new GraphMailConnector(target, getToken, isShared);
+        return new GraphMailConnector(
+          target,
+          getToken,
+          isShared,
+          this.smtpSubmitter(mc.account, oauth),
+        );
       case "ews":
         return new EwsMailConnector(target, getToken, isShared);
       case "imap":

@@ -4,10 +4,12 @@ import type {
   MailMessageFull,
   MailSendOpts,
   OutgoingAttachment,
+  RawMailSubmitter,
   SendReceipt,
 } from "../../types/index.js";
 import { fetchWithExecutionContext as fetch } from "../../utils/execution-context.js";
 import { hasFolder, looksLikeFolderId, wellKnownMailFolder } from "../../utils/mail-folders.js";
+import { stripBccHeader } from "../../utils/mail-headers.js";
 import { assembleHtml } from "../../utils/mail-html.js";
 import { assertResponseSize, fetchWithTimeout } from "../../utils/security.js";
 
@@ -54,15 +56,30 @@ interface GraphMessage {
   attachments?: GraphAttachment[];
 }
 
+interface GraphDraftRecipients {
+  from?: { emailAddress?: { address?: string } };
+  sender?: { emailAddress?: { address?: string } };
+  toRecipients?: { emailAddress?: { address?: string } }[];
+  ccRecipients?: { emailAddress?: { address?: string } }[];
+  bccRecipients?: { emailAddress?: { address?: string } }[];
+}
+
 export class GraphMailConnector implements MailConnector {
   readonly tier = "graph";
   signature?: string;
   displayName?: string;
 
+  /**
+   * With a `submitter`, mail is sent over SMTP and Graph only reads and writes
+   * the mailbox. Graph's own send actions need the `Mail.Send` permission,
+   * which Thunderbird's app registration does not carry; Thunderbird itself
+   * sends over SMTP, and so does this connector when it is given a submitter.
+   */
   constructor(
     readonly account: string,
     private readonly getToken: () => Promise<string | null>,
     private readonly shared = false,
+    private readonly submitter?: RawMailSubmitter,
   ) {}
 
   private get base(): string {
@@ -193,10 +210,9 @@ export class GraphMailConnector implements MailConnector {
   ): Promise<SendReceipt> {
     // The sendMail action can't carry >3MB attachments (they need an upload
     // session against a saved message), so route those via a draft + send.
-    if (opts?.attachments?.some(isLargeAttachment)) {
+    if (this.submitter || opts?.attachments?.some(isLargeAttachment)) {
       const draft = await this.createDraft(to, subject, body, opts);
-      await this.sendDraft(draft.id);
-      return {};
+      return this.sendDraft(draft.id);
     }
     const h = await this.headers();
     const html = assembleHtml(body, this.signature);
@@ -322,12 +338,63 @@ export class GraphMailConnector implements MailConnector {
   }
 
   async sendDraft(id: string): Promise<SendReceipt> {
+    if (this.submitter) return this.submitDraft(id, this.submitter);
     const h = await this.headers();
     const res = await fetch(`${this.base}/messages/${encodeURIComponent(id)}/send`, {
       method: "POST",
       headers: h,
     });
     if (!res.ok) throw new Error(`Graph sendDraft: ${String(res.status)} ${await res.text()}`);
+    return {};
+  }
+
+  /**
+   * Sends a saved draft over SMTP: read its recipients and its MIME form from
+   * Graph, submit it, then remove the draft. The recipients come from the
+   * message resource and not from the MIME header, because Bcc recipients
+   * need to be in the envelope and must not be in the header.
+   *
+   * Removing the draft comes after delivery, so its failure is a warning and
+   * never turns a delivered message into an error. Exchange Online files the
+   * Sent copy itself when a message is submitted.
+   */
+  private async submitDraft(id: string, submitter: RawMailSubmitter): Promise<SendReceipt> {
+    const h = await this.headers();
+    const ref = encodeURIComponent(id);
+    const metaRes = await fetch(
+      `${this.base}/messages/${ref}?$select=from,sender,toRecipients,ccRecipients,bccRecipients`,
+      { headers: h },
+    );
+    if (!metaRes.ok)
+      throw new Error(`Graph readDraft: ${String(metaRes.status)} ${await metaRes.text()}`);
+    const meta = (await metaRes.json()) as GraphDraftRecipients;
+    const addressOf = (r: { emailAddress?: { address?: string } }): string =>
+      r.emailAddress?.address ?? "";
+    const to = [
+      ...(meta.toRecipients ?? []),
+      ...(meta.ccRecipients ?? []),
+      ...(meta.bccRecipients ?? []),
+    ]
+      .map(addressOf)
+      .filter((address) => address !== "");
+    if (to.length === 0) throw new Error(`Graph sendDraft: draft ${id} has no recipients.`);
+    const from = addressOf(meta.from ?? {}) || addressOf(meta.sender ?? {}) || this.account;
+
+    const mimeRes = await fetch(`${this.base}/messages/${ref}/$value`, {
+      headers: { Authorization: h.Authorization ?? "" },
+    });
+    if (!mimeRes.ok)
+      throw new Error(`Graph readDraftMime: ${String(mimeRes.status)} ${await mimeRes.text()}`);
+    const raw = stripBccHeader(Buffer.from(await mimeRes.arrayBuffer()));
+
+    await submitter.submitRaw(raw, { from, to });
+
+    try {
+      await this.deleteMessage(id);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return { warning: `Sent, but the draft could not be removed: ${reason}` };
+    }
     return {};
   }
 
@@ -371,6 +438,7 @@ export class GraphMailConnector implements MailConnector {
     });
     if (!r2.ok) throw new Error(`Graph updateReply: ${String(r2.status)} ${await r2.text()}`);
     if (opts?.attachments?.length) await this.postAttachments(draft.id, opts.attachments);
+    if (this.submitter) return this.sendDraft(draft.id);
     // Send
     const r3 = await fetch(`${this.base}/messages/${draft.id}/send`, {
       method: "POST",
@@ -408,6 +476,7 @@ export class GraphMailConnector implements MailConnector {
     });
     if (!r2.ok) throw new Error(`Graph updateForward: ${String(r2.status)} ${await r2.text()}`);
     if (opts?.attachments?.length) await this.postAttachments(draft.id, opts.attachments);
+    if (this.submitter) return this.sendDraft(draft.id);
     // Send
     const r3 = await fetch(`${this.base}/messages/${draft.id}/send`, {
       method: "POST",

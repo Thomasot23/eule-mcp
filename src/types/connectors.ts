@@ -89,6 +89,15 @@ export interface SendReceipt {
   readonly warning?: string;
 }
 
+/**
+ * Submits a finished MIME message for delivery, without a mailbox of its own.
+ *
+ * Without an envelope, the recipients are read from the message headers.
+ */
+export interface RawMailSubmitter {
+  submitRaw(raw: Buffer, envelope?: { from: string; to: readonly string[] }): Promise<void>;
+}
+
 /** Mail connector interface — implemented per API tier. */
 export interface MailConnector {
   readonly account: string;

@@ -221,6 +221,98 @@ export async function getAccessToken(
   return token.accessToken;
 }
 
+/** Access tokens minted for a tier other than the one an account signed in with. */
+const tierTokenCache = new Map<string, { accessToken: string; expiresAt: number }>();
+const tierTokenInFlight = new Map<string, Promise<string | null>>();
+
+/**
+ * An access token for `tier`, for an account that signed in with another tier.
+ *
+ * The refresh token of the sign-in is redeemed for the other API. That is how
+ * Thunderbird gets by with a single sign-in per account: a Graph sign-in with
+ * its registration can read and write mail, but only the Exchange Online
+ * resource (IMAP and SMTP.Send) lets it send. The access token is kept in
+ * memory only; the stored token of the account stays as it was, except for the
+ * rotated refresh token, which has to be saved or the next refresh fails.
+ */
+export async function getAccessTokenForTier(
+  account: string,
+  tier: ApiTier,
+  oauth: OAuthConfig = DEFAULT_OAUTH,
+): Promise<string | null> {
+  const stored = loadTokens().accounts[account];
+  if (!stored) return null;
+  if (stored.tier === tier) return getAccessToken(account, oauth);
+
+  const key = `${account}|${tier}`;
+  const cached = tierTokenCache.get(key);
+  if (cached && cached.expiresAt - Date.now() >= 5 * 60 * 1000) return cached.accessToken;
+
+  // Two callers at once would each rotate the refresh token, and the second
+  // would redeem one that is already spent.
+  const pending = tierTokenInFlight.get(key);
+  if (pending) return pending;
+
+  const run = redeemForTier(account, tier, oauth, key).finally(() => tierTokenInFlight.delete(key));
+  tierTokenInFlight.set(key, run);
+  return run;
+}
+
+async function redeemForTier(
+  account: string,
+  tier: ApiTier,
+  oauth: OAuthConfig,
+  cacheKey: string,
+): Promise<string | null> {
+  const token = loadTokens().accounts[account];
+  if (!token?.refreshToken) return null;
+
+  const clientId = token.clientId ?? oauth.clientId;
+  const apiVersion = token.apiVersion ?? oauth.apiVersion;
+  const endpointOauth: OAuthConfig = { ...oauth, clientId, apiVersion };
+  const res = await fetch(tokenEndpoint(endpointOauth), {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      grant_type: "refresh_token",
+      refresh_token: token.refreshToken,
+      ...tierAuthParam(endpointOauth, tier),
+    }).toString(),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    // A dead refresh token needs a new sign-in. A refusal for the other
+    // resource (consent not given, resource unknown) does not: signing in
+    // again would not help, so it says what Microsoft said.
+    if (
+      /interaction_required|invalid_grant|AADSTS(50076|50078|700082|700084|50173)/.test(errBody)
+    ) {
+      throw new InteractionRequiredError(account);
+    }
+    throw new Error(
+      `Microsoft refused to issue a token for the ${tier} tier of ${account} (${String(res.status)}): ${errBody.slice(0, 300)}`,
+    );
+  }
+
+  const data = parseTokenResponse(await res.json());
+
+  // Only the refresh token is written back; see getAccessTokenForTier.
+  if (data.refresh_token) {
+    const store = loadTokens();
+    const prior = store.accounts[account] ?? token;
+    store.accounts[account] = { ...prior, refreshToken: data.refresh_token };
+    saveTokens(store);
+  }
+
+  tierTokenCache.set(cacheKey, {
+    accessToken: data.access_token,
+    expiresAt: Date.now() + data.expires_in * 1000,
+  });
+  return data.access_token;
+}
+
 /**
  * Exchange an authorization code for tokens.
  */

@@ -17,6 +17,7 @@ import {
 import type {
   MailAttachment,
   MailConnector,
+  RawMailSubmitter,
   MailMessage,
   MailMessageFull,
   MailSendOpts,
@@ -336,7 +337,7 @@ function envelopeDate(date: Date | string | undefined): string {
   return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
 }
 
-export class ImapMailConnector implements MailConnector {
+export class ImapMailConnector implements MailConnector, RawMailSubmitter {
   readonly tier = "imap";
   signature?: string;
   displayName?: string;
@@ -794,6 +795,23 @@ export class ImapMailConnector implements MailConnector {
     }
   }
 
+  /**
+   * Submits a finished MIME message over SMTP and does nothing else: no mailbox
+   * is opened and no Sent copy is filed. Without an envelope, the recipients
+   * come from the message headers.
+   */
+  async submitRaw(raw: Buffer, envelope?: { from: string; to: readonly string[] }): Promise<void> {
+    const transport = await this.makeTransport();
+    try {
+      await transport.sendMail({
+        envelope: envelope ? { from: envelope.from, to: [...envelope.to] } : (false as never),
+        raw,
+      });
+    } finally {
+      transport.close();
+    }
+  }
+
   async sendDraft(id: string): Promise<SendReceipt> {
     const { mailbox, uid } = parseImapId(id, "Drafts");
     const client = await this.connect();
@@ -805,12 +823,7 @@ export class ImapMailConnector implements MailConnector {
         throw new Error(`Draft ${id} not found`);
       raw = msg.source;
 
-      const transport = await this.makeTransport();
-      try {
-        await transport.sendMail({ envelope: false as never, raw });
-      } finally {
-        transport.close();
-      }
+      await this.submitRaw(raw);
 
       // Delivered: the draft is spent whether or not the Sent copy works out.
       await client.messageFlagsAdd(String(uid), ["\\Deleted"], { uid: true });
