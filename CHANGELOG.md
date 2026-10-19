@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.3](https://github.com/metaneutrons/eule-mcp/compare/v0.10.2...v0.10.3) (2026-10-19)
+
+
+### Bug Fixes
+
+* **paperless:** share and paginate resilient metadata lookups ([#119](https://github.com/metaneutrons/eule-mcp/issues/119)) ([69fec32](https://github.com/metaneutrons/eule-mcp/commit/69fec32c793d8350f47409ad7b60ed138a192984))
+
 ## [0.10.2](https://github.com/metaneutrons/eule-mcp/compare/v0.10.1...v0.10.2) (2026-10-18)
 
 
