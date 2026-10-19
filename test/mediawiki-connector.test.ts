@@ -44,7 +44,9 @@ interface FakeWiki {
 function fakeWiki(
   credentials: { user: string; password: string },
   extendedSearch: "none" | "ok" | "broken" = "none",
+  failingSignIns = 0,
 ): FakeWiki {
+  let failuresLeft = failingSignIns;
   const signedIn = new Set<string>();
   const posts: string[] = [];
   let nextSession = 1;
@@ -90,6 +92,15 @@ function fakeWiki(
         form.get("password") !== credentials.password
       )
         return html(ERROR_PAGE);
+      if (failuresLeft > 0) {
+        failuresLeft--;
+        // MediaWiki's exception page, as a wiki serves it when
+        // two clients signed in at the same moment.
+        return new Response(
+          `<div class="errorbox">[0123456789abcdef01234567] 2026-01-01 12:00:00: Fataler Ausnahmefehler des Typs „Wikimedia\\Rdbms\\DBQueryError“</div>`,
+          { status: 500, headers: { "content-type": "text/html" } },
+        );
+      }
       if (session) signedIn.add(session);
       return redirect("/wiki/Spezial:PluggableAuthLogin", "wikiUserID=7; path=/");
     }
@@ -171,8 +182,10 @@ function fakeWiki(
             {
               type: "repofile",
               filename: "Reiseantrag_2026.pdf",
-              namespace: 6,
-              namespace_text: "Datei",
+              // As seen on a production BlueSpice: the index labels some
+              // uploads with the main namespace.
+              namespace: 0,
+              namespace_text: "(Seiten)",
               highlight: "Formular für <b>Dienstreisen</b> &amp; Kostenstelle",
               size: 52000,
             },
@@ -187,7 +200,7 @@ function fakeWiki(
               "-1": { id: -1 },
               "0": { id: 0 },
               "1": { id: 1 },
-              "6": { id: 6 },
+              "6": { id: 6, name: "Datei" },
               "10": { id: 10 },
               "3000": { id: 3000 },
             },
@@ -375,6 +388,45 @@ describe("MediaWikiConnector", () => {
     await expect(connector.search("x")).rejects.toThrow(/sign-in page answered 503/);
     down = false;
     await expect(connector.search("x")).resolves.toHaveLength(1);
+  });
+
+  it("retries once when the wiki fails while signing in, without pausing", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      resetMediaWikiSessions();
+      wiki = fakeWiki({ user: "tester", password: "geheim" }, "none", 1);
+      vi.stubGlobal("fetch", wiki.fetch);
+      const search = new MediaWikiConnector("tester", ORIGIN, "geheim").search("x");
+      await vi.runAllTimersAsync();
+      await expect(search).resolves.toHaveLength(1);
+      expect(wiki.posts()).toEqual(["form", "form"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports a wiki that keeps failing as a server error, not a wrong password", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      resetMediaWikiSessions();
+      wiki = fakeWiki({ user: "tester", password: "geheim" }, "none", 5);
+      vi.stubGlobal("fetch", wiki.fetch);
+      const connector = new MediaWikiConnector("tester", ORIGIN, "geheim");
+      const first = connector.search("x");
+      const outcome = expect(first).rejects.toThrow(
+        /The wiki failed while signing in \(HTTP 500\): \[0123456789abcdef01234567\]/,
+      );
+      await vi.runAllTimersAsync();
+      await outcome;
+      // No ten-minute pause: the next call tries again.
+      const second = connector.search("x");
+      const again = expect(second).rejects.toThrow(/failed while signing in/);
+      await vi.runAllTimersAsync();
+      await again;
+      expect(wiki.posts()).toHaveLength(4);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("signs in with a bot password through action=login", async () => {

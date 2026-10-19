@@ -12,6 +12,7 @@ import {
   CookieJar,
   isBotPasswordAccount,
   loginErrorMessage,
+  mediaWikiExceptionMessage,
   parseLoginForm,
   secretFingerprint,
   sessionFetch,
@@ -41,6 +42,8 @@ interface Endpoints {
 
 interface SiteInfo {
   readonly searchNamespaces: readonly number[];
+  /** Local name of the file namespace (6), e.g. "Datei". */
+  readonly fileNamespace: string;
   /** BlueSpice ExtendedSearch is installed; it also indexes file contents. */
   readonly extendedSearch: boolean;
 }
@@ -78,6 +81,11 @@ interface Session {
 
 /** The wiki refused the username or password (as opposed to an outage). */
 class SignInRejected extends Error {}
+
+/** The wiki failed while signing in (HTTP 5xx, exception page); worth one retry. */
+class WikiServerError extends Error {}
+
+const SERVER_ERROR_RETRY_MS = 1500;
 
 /** An error the MediaWiki API reported, with its machine-readable code. */
 class WikiApiError extends Error {
@@ -192,10 +200,21 @@ export class MediaWikiConnector implements WikiConnector {
       );
     this.session.signingIn ??= (async () => {
       try {
-        this.session.jar.clear();
         this.session.signedIn = false;
-        if (isBotPasswordAccount(this.account)) await this.botPasswordSignIn();
-        else await this.formSignIn();
+        const attempt = async () => {
+          this.session.jar.clear();
+          if (isBotPasswordAccount(this.account)) await this.botPasswordSignIn();
+          else await this.formSignIn();
+        };
+        try {
+          await attempt();
+        } catch (error) {
+          // A server failure (seen when two clients sign in at the same time)
+          // says nothing about the password: wait briefly and try once more.
+          if (!(error instanceof WikiServerError)) throw error;
+          await new Promise((resolve) => setTimeout(resolve, SERVER_ERROR_RETRY_MS));
+          await attempt();
+        }
         this.session.signedIn = true;
         this.session.failure = undefined;
       } catch (error) {
@@ -228,6 +247,8 @@ export class MediaWikiConnector implements WikiConnector {
         lgtoken: token,
       }),
     });
+    if (res.status >= 500)
+      throw new WikiServerError(`The wiki failed while signing in (HTTP ${String(res.status)}).`);
     const data = (await res.json()) as ApiResponse;
     if (data.login?.result !== "Success")
       throw new SignInRejected(
@@ -238,6 +259,8 @@ export class MediaWikiConnector implements WikiConnector {
   private async formSignIn(): Promise<void> {
     const { index } = await this.endpoints();
     const page = await sessionFetch(this.session.jar, `${index}?title=Special:UserLogin`);
+    if (page.res.status >= 500)
+      throw new WikiServerError(`The wiki's sign-in page answered ${String(page.res.status)}.`);
     if (!page.res.ok)
       throw new Error(`The wiki's sign-in page answered ${String(page.res.status)}.`);
     const form = parseLoginForm(await page.res.text(), page.url);
@@ -250,6 +273,11 @@ export class MediaWikiConnector implements WikiConnector {
       body,
     });
     const html = await res.text();
+    const exception = mediaWikiExceptionMessage(html);
+    if (res.status >= 500 || exception)
+      throw new WikiServerError(
+        `The wiki failed while signing in (HTTP ${String(res.status)})${exception ? `: ${exception}` : "."}`,
+      );
     const user = await this.call({ action: "query", meta: "userinfo" }, false);
     const info = user.query?.userinfo as { anon?: boolean; id?: number } | undefined;
     if (!info || info.anon || !info.id)
@@ -290,9 +318,10 @@ export class MediaWikiConnector implements WikiConnector {
       this.api({ action: "query", meta: "siteinfo", siprop: "namespaces" }),
       this.api({ action: "paraminfo", modules: EXTENDED_SEARCH_MODULE }),
     ]);
-    const namespaces = Object.values(
-      (data.query?.namespaces ?? {}) as Record<string, { id: number }>,
-    ).map((ns) => ns.id);
+    const entries = Object.values(
+      (data.query?.namespaces ?? {}) as Record<string, { id: number; name?: string }>,
+    );
+    const namespaces = entries.map((ns) => ns.id);
     const paraminfo = (modules as { paraminfo?: { modules?: { name?: string }[] } }).paraminfo;
     this.session.site = {
       // Talk namespaces are odd; Special/Media are negative.
@@ -300,6 +329,7 @@ export class MediaWikiConnector implements WikiConnector {
         (id) => id >= 0 && id % 2 === 0 && !NOISE_NAMESPACES.has(id),
       ),
       extendedSearch: (paraminfo?.modules ?? []).some((m) => m.name === EXTENDED_SEARCH_MODULE),
+      fileNamespace: entries.find((ns) => ns.id === 6)?.name ?? "File",
     };
     return this.session.site;
   }
@@ -320,7 +350,7 @@ export class MediaWikiConnector implements WikiConnector {
     // Namespace and title filters are MediaWiki search features; without
     // them BlueSpice's own search is preferred because it reads file contents.
     if (site.extendedSearch && !options.namespaces?.length && !options.titlesOnly) {
-      const hits = await this.extendedSearch(query, limit);
+      const hits = await this.extendedSearch(query, limit, site.fileNamespace);
       if (hits) return hits;
     }
     const namespaces = options.namespaces?.length ? options.namespaces : site.searchNamespaces;
@@ -360,7 +390,11 @@ export class MediaWikiConnector implements WikiConnector {
    * SearchCenter: a JSON lookup with an AND query string. Returns undefined
    * when the backend fails, so the caller falls back to MediaWiki search.
    */
-  private async extendedSearch(query: string, limit: number): Promise<WikiSearchHit[] | undefined> {
+  private async extendedSearch(
+    query: string,
+    limit: number,
+    fileNamespace: string,
+  ): Promise<WikiSearchHit[] | undefined> {
     const lookup = {
       query: { bool: { must: [{ query_string: { query, default_operator: "AND" } }] } },
       size: limit,
@@ -381,8 +415,10 @@ export class MediaWikiConnector implements WikiConnector {
       const found =
         result.type === "wikipage"
           ? result.prefixed_title
-          : result.type === "repofile" && result.filename
-            ? `${result.namespace_text ?? "File"}:${result.filename}`
+          : // A file's page is always in the file namespace; the index may
+            // label it otherwise (BlueSpice reports "(Seiten)" for some).
+            result.type === "repofile" && result.filename
+            ? `${fileNamespace}:${result.filename}`
             : undefined;
       if (!found) continue;
       // BlueSpice lists a redirect as a hit of its own; report its target.
@@ -391,7 +427,7 @@ export class MediaWikiConnector implements WikiConnector {
       const snippet = stripTags(result.highlight ?? result.rendered_content_snippet ?? "");
       const hit: WikiSearchHit = {
         title,
-        namespace: result.namespace ?? (result.type === "repofile" ? 6 : 0),
+        namespace: result.type === "repofile" ? 6 : (result.namespace ?? 0),
         snippet: snippet || undefined,
         size: redirect ? undefined : result.size,
         url: await this.pageUrl(title),

@@ -178,3 +178,14 @@ export function loginErrorMessage(html: string): string | undefined {
   const text = box ? stripTags(box[1] ?? "") : "";
   return text || undefined;
 }
+
+/**
+ * The message of a MediaWiki exception page ("[<request id>] <timestamp>:
+ * Fatal exception of type …", localized), or undefined. Such a page is a
+ * server failure, not a verdict on the credentials.
+ */
+export function mediaWikiExceptionMessage(html: string): string | undefined {
+  const text = stripTags(html);
+  const match = /\[[0-9a-f]{20,}\] \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}: [^\n]{0,200}/i.exec(text);
+  return match?.[0].trim();
+}
