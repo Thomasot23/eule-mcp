@@ -40,6 +40,11 @@ import { ConfiguredCredentialResolver } from "../helper/configured-credential-re
 
 export class ConnectorRegistry {
   private readonly policy: RolePolicyService;
+  private documentConfig?: ReturnType<ConfigManager["get"]>;
+  private readonly documentConnectors = new Map<
+    string,
+    { account: string; url: string; token: string; connector: PaperlessConnector }
+  >();
 
   constructor(
     private readonly config: ConfigManager,
@@ -480,13 +485,32 @@ export class ConnectorRegistry {
 
   /** Get all document connectors, optionally filtered by role. */
   getDocumentConnectors(role?: string, mode: AccessMode = "read"): DocumentConnector[] {
+    const config = this.config.get();
+    if (config !== this.documentConfig) {
+      this.documentConnectors.clear();
+      this.documentConfig = config;
+    }
     const connectors: DocumentConnector[] = [];
     const roles = this.policy.select(role, "documents", mode);
     for (const r of roles) {
       for (const dc of r.connectors.documents ?? []) {
+        const key = JSON.stringify([r.id, dc.id]);
         const token = this.secrets.connector(dc);
         if (dc.type === "paperless" && dc.url && token) {
-          connectors.push(new PaperlessConnector(dc.account || dc.id, dc.url, token));
+          const account = dc.account || dc.id;
+          let cached = this.documentConnectors.get(key);
+          if (cached?.account !== account || cached.url !== dc.url || cached.token !== token) {
+            cached = {
+              account,
+              url: dc.url,
+              token,
+              connector: new PaperlessConnector(account, dc.url, token),
+            };
+            this.documentConnectors.set(key, cached);
+          }
+          connectors.push(cached.connector);
+        } else {
+          this.documentConnectors.delete(key);
         }
       }
     }

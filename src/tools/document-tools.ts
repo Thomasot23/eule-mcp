@@ -7,7 +7,10 @@ import { executeTool, textResult } from "./tool-runtime.js";
 
 const formatDoc = (d: DocDocument) => {
   const tags = d.tags.map((t) => t.name).join(", ");
-  return `#${String(d.id)} ${d.title}${d.correspondent ? ` | ${d.correspondent.name}` : ""}${d.documentType ? ` [${d.documentType.name}]` : ""}${tags ? ` {${tags}}` : ""}${d.created ? ` (${d.created.slice(0, 10)})` : ""}`;
+  return [
+    `#${String(d.id)} ${d.title}${d.correspondent ? ` | ${d.correspondent.name}` : ""}${d.documentType ? ` [${d.documentType.name}]` : ""}${tags ? ` {${tags}}` : ""}${d.created ? ` (${d.created.slice(0, 10)})` : ""}`,
+    ...(d.warnings ?? []).map((warning) => `⚠️ ${warning}`),
+  ].join("\n");
 };
 const bulkMethod = z.enum([
   "add_tag",

@@ -254,6 +254,15 @@ Backends:
 
 ### 📄 Documents (7)
 
+Paperless metadata lookups are shared across concurrent requests and cached for
+60 seconds per role/connector. All lookup pages are loaded, including instances
+with more than 200 tags, correspondents or document types. Creating a lookup
+entry invalidates its cache immediately; configuration or credential changes
+replace the connector. If a lookup fails or exceeds its five-second budget,
+documents and OCR remain available with raw IDs and a visible warning. Failed
+lookups are retried after a five-second backoff; document-fetch failures still
+report an error, not an empty search.
+
 | Tool | Description |
 |---|---|
 | `doc_search` | Full-text search across documents (Paperless-NGX) |

@@ -7,6 +7,7 @@ import type {
   DocBulkMethod,
 } from "../../types/index.js";
 import { assertResponseSize, assertSecureUrl, fetchWithTimeout } from "../../utils/security.js";
+import { LookupCache } from "./lookup-cache.js";
 
 interface PaperlessDoc {
   id: number;
@@ -44,6 +45,7 @@ interface PaperlessDocType {
 interface PaperlessPage<T> {
   count: number;
   results: T[];
+  next?: string | null;
 }
 
 const ALGO_MAP: Record<string, number> = {
@@ -65,7 +67,7 @@ export class PaperlessConnector implements DocumentConnector {
 
   /** Validated base URL — the API token must never traverse cleartext. */
   private get root(): string {
-    return assertSecureUrl(this.baseUrl, "Paperless URL");
+    return assertSecureUrl(this.baseUrl.replace(/\/+$/, ""), "Paperless URL");
   }
 
   private async req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -80,24 +82,54 @@ export class PaperlessConnector implements DocumentConnector {
       throw new Error(
         `Paperless ${init?.method ?? "GET"} ${path}: ${String(res.status)} ${await res.text()}`,
       );
+    assertResponseSize(res);
     return (await res.json()) as T;
   }
 
-  // --- Tags cache for resolving IDs ---
-  private tagCache: DocTag[] | null = null;
-  private corrCache: DocCorrespondent[] | null = null;
-  private typeCache: DocDocumentType[] | null = null;
+  private readonly tagCache = new LookupCache<DocTag[]>();
+  private readonly corrCache = new LookupCache<DocCorrespondent[]>();
+  private readonly typeCache = new LookupCache<DocDocumentType[]>();
+
+  /** Follow only this lookup endpoint's pages; never forward the token elsewhere. */
+  private async lookupPages<T>(path: string): Promise<T[]> {
+    const apiRoot = new URL(`${this.root}/api`).href;
+    const first = new URL(`${apiRoot}${path}?page_size=200`);
+    const seen = new Set<string>();
+    const results: T[] = [];
+    // Bound the entire chain, not each page: metadata must not consume the tool timeout.
+    const signal = AbortSignal.timeout(5_000);
+    let next: URL | undefined = first;
+    while (next) {
+      if (
+        next.origin !== first.origin ||
+        next.pathname !== first.pathname ||
+        next.username ||
+        next.password ||
+        seen.has(next.href) ||
+        seen.size >= 1_000
+      ) {
+        throw new Error("Paperless returned an unsafe or cyclic lookup pagination URL");
+      }
+      seen.add(next.href);
+      const page: PaperlessPage<T> = await this.req(next.href.slice(apiRoot.length), {
+        signal,
+        redirect: "error",
+      });
+      results.push(...page.results);
+      next = page.next ? new URL(page.next, next) : undefined;
+    }
+    return results;
+  }
 
   async listTags(): Promise<DocTag[]> {
-    if (this.tagCache) return this.tagCache;
-    const data = await this.req<PaperlessPage<PaperlessTag>>("/tags/?page_size=200");
-    this.tagCache = data.results.map((t) => ({
-      id: t.id,
-      name: t.name,
-      color: t.color ?? (t.colour != null ? `#${String(t.colour)}` : undefined),
-      match: t.match,
-    }));
-    return this.tagCache;
+    return this.tagCache.get(async () =>
+      (await this.lookupPages<PaperlessTag>("/tags/")).map((t) => ({
+        id: t.id,
+        name: t.name,
+        color: t.color ?? (t.colour != null ? `#${String(t.colour)}` : undefined),
+        match: t.match,
+      })),
+    );
   }
 
   async createTag(
@@ -112,17 +144,18 @@ export class PaperlessConnector implements DocumentConnector {
       method: "POST",
       body: JSON.stringify(body),
     });
-    this.tagCache = null;
+    this.tagCache.invalidate();
     return { id: t.id, name: t.name, color: t.color, match: t.match };
   }
 
   async listCorrespondents(): Promise<DocCorrespondent[]> {
-    if (this.corrCache) return this.corrCache;
-    const data = await this.req<PaperlessPage<PaperlessCorrespondent>>(
-      "/correspondents/?page_size=200",
+    return this.corrCache.get(async () =>
+      (await this.lookupPages<PaperlessCorrespondent>("/correspondents/")).map((c) => ({
+        id: c.id,
+        name: c.name,
+        match: c.match,
+      })),
     );
-    this.corrCache = data.results.map((c) => ({ id: c.id, name: c.name, match: c.match }));
-    return this.corrCache;
   }
 
   async createCorrespondent(name: string, opts?: { match?: string }): Promise<DocCorrespondent> {
@@ -132,15 +165,18 @@ export class PaperlessConnector implements DocumentConnector {
       method: "POST",
       body: JSON.stringify(body),
     });
-    this.corrCache = null;
+    this.corrCache.invalidate();
     return { id: c.id, name: c.name, match: c.match };
   }
 
   async listDocumentTypes(): Promise<DocDocumentType[]> {
-    if (this.typeCache) return this.typeCache;
-    const data = await this.req<PaperlessPage<PaperlessDocType>>("/document_types/?page_size=200");
-    this.typeCache = data.results.map((d) => ({ id: d.id, name: d.name, match: d.match }));
-    return this.typeCache;
+    return this.typeCache.get(async () =>
+      (await this.lookupPages<PaperlessDocType>("/document_types/")).map((d) => ({
+        id: d.id,
+        name: d.name,
+        match: d.match,
+      })),
+    );
   }
 
   async createDocumentType(name: string, opts?: { match?: string }): Promise<DocDocumentType> {
@@ -150,7 +186,7 @@ export class PaperlessConnector implements DocumentConnector {
       method: "POST",
       body: JSON.stringify(body),
     });
-    this.typeCache = null;
+    this.typeCache.invalidate();
     return { id: d.id, name: d.name, match: d.match };
   }
 
@@ -158,14 +194,14 @@ export class PaperlessConnector implements DocumentConnector {
     const data = await this.req<PaperlessPage<PaperlessDoc>>(
       `/documents/?query=${encodeURIComponent(query)}&page_size=${String(limit)}`,
     );
-    return Promise.all(data.results.map((d) => this.resolve(d)));
+    return this.resolveDocuments(data.results);
   }
 
   async listDocuments(page = 1, pageSize = 25): Promise<DocDocument[]> {
     const data = await this.req<PaperlessPage<PaperlessDoc>>(
       `/documents/?page=${String(page)}&page_size=${String(pageSize)}&ordering=-added`,
     );
-    return Promise.all(data.results.map((d) => this.resolve(d)));
+    return this.resolveDocuments(data.results);
   }
 
   async getDocument(id: number): Promise<DocDocument> {
@@ -251,27 +287,51 @@ export class PaperlessConnector implements DocumentConnector {
   }
 
   private async resolve(d: PaperlessDoc): Promise<DocDocument> {
-    const [tags, corrs, types] = await Promise.all([
+    const [document] = await this.resolveDocuments([d]);
+    if (!document) throw new Error("Paperless returned no document");
+    return document;
+  }
+
+  private async resolveDocuments(documents: PaperlessDoc[]): Promise<DocDocument[]> {
+    if (documents.length === 0) return [];
+    const [tags, corrs, types] = await Promise.allSettled([
       this.listTags(),
       this.listCorrespondents(),
       this.listDocumentTypes(),
     ]);
-    return {
-      id: d.id,
-      title: d.title,
-      content: d.content,
-      correspondent:
-        d.correspondent != null ? (corrs.find((c) => c.id === d.correspondent) ?? null) : null,
-      documentType:
-        d.document_type != null ? (types.find((t) => t.id === d.document_type) ?? null) : null,
-      tags: (d.tags ?? [])
-        .map((tid) => tags.find((t) => t.id === tid))
-        .filter((t): t is DocTag => t != null),
-      created: d.created,
-      modified: d.modified,
-      added: d.added,
-      archiveSerialNumber: d.archive_serial_number,
-      originalFileName: d.original_file_name,
-    };
+    const index = <T extends { id: number }>(result: PromiseSettledResult<T[]>) =>
+      new Map((result.status === "fulfilled" ? result.value : []).map((item) => [item.id, item]));
+    const tagIndex = index(tags);
+    const corrIndex = index(corrs);
+    const typeIndex = index(types);
+    return documents.map((d) => {
+      const warnings = new Set<string>();
+      const lookup = <T extends { id: number; name: string }>(
+        items: Map<number, T>,
+        id: number,
+        label: string,
+      ): T | { id: number; name: string } => {
+        const item = items.get(id);
+        if (item) return item;
+        warnings.add(`Paperless ${label} names could not be resolved; raw IDs are shown.`);
+        return { id, name: `${label} #${String(id)}` };
+      };
+      return {
+        id: d.id,
+        title: d.title,
+        content: d.content,
+        correspondent:
+          d.correspondent != null ? lookup(corrIndex, d.correspondent, "correspondent") : null,
+        documentType:
+          d.document_type != null ? lookup(typeIndex, d.document_type, "document type") : null,
+        tags: (d.tags ?? []).map((id) => lookup(tagIndex, id, "tag")),
+        ...(warnings.size ? { warnings: [...warnings] } : {}),
+        created: d.created,
+        modified: d.modified,
+        added: d.added,
+        archiveSerialNumber: d.archive_serial_number,
+        originalFileName: d.original_file_name,
+      };
+    });
   }
 }

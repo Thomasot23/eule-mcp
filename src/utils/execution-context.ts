@@ -21,6 +21,11 @@ export function runWithExecutionContext<T>(context: ExecutionContext, callback: 
   return store.run(context, callback);
 }
 
+/** Shared work must use its own deadline, not one subscriber's cancellation. */
+export function runWithoutExecutionContext<T>(callback: () => T): T {
+  return store.exit(callback);
+}
+
 /** Fetch that composes a caller-provided signal with the active operation signal. */
 export function fetchWithExecutionContext(
   input: string | URL | Request,

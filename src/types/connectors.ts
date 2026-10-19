@@ -291,6 +291,8 @@ export interface DocDocument {
   readonly added?: string;
   readonly archiveSerialNumber?: number | null;
   readonly originalFileName?: string;
+  /** Best-effort metadata failures; raw IDs remain available in the document. */
+  readonly warnings?: readonly string[];
 }
 
 /** Bulk edit method. */
