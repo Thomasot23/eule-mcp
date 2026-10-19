@@ -40,6 +40,19 @@ export const PDF_TO_MARKDOWN_SCRIPT = [
   "sys.stdout.write(markdown)",
 ].join("\n");
 
+/**
+ * pymupdf4llm frames OCR'd picture text with HTML comments and breaks lines
+ * with <br>; both are noise for a reader of the text.
+ */
+export function tidyPdfMarkdown(markdown: string): string {
+  return markdown
+    .replace(/<!--\s*(?:Start|End) of picture text\s*-->/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export interface ExtractResult {
   text: string;
   /** How the text was produced: pymupdf4llm | pandoc | utf-8 | utf-8-fallback. */
@@ -70,7 +83,7 @@ export function extractAttachmentText(buf: Buffer, filename: string): ExtractRes
       const out = execFileSync("python3", ["-c", PDF_TO_MARKDOWN_SCRIPT, tmp], {
         maxBuffer: 20 * 1024 * 1024,
       }).toString();
-      return { text: out, method: "pymupdf4llm" };
+      return { text: tidyPdfMarkdown(out), method: "pymupdf4llm" };
     }
     if (pandocFormat) return { text: convertWithPandoc(tmp, pandocFormat), method: "pandoc" };
     return { text: buf.toString("utf-8"), method: "utf-8-fallback" };
