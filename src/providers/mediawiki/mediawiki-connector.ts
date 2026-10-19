@@ -460,6 +460,8 @@ export class MediaWikiConnector implements WikiConnector {
       redirects: true,
       disableeditsection: true,
       disablelimitreport: true,
+      // The sections are listed separately; the rendered TOC only costs tokens.
+      disabletoc: true,
       section,
     }).catch((error: unknown) => {
       if (error instanceof WikiApiError && error.code === "missingtitle")

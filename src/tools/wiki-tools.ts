@@ -32,7 +32,9 @@ function formatPage(page: WikiPage, maxChars: number): string {
     page.sections.length
       ? `Sections: ${page.sections.map((s) => `${s.index} ${s.title}`).join(" | ")}`
       : "",
-    `\n---\n\n${truncate(page.content, maxChars)}`,
+    page.content.trim()
+      ? `\n---\n\n${truncate(page.content, maxChars)}`
+      : "\n(The page has no text of its own. For an uploaded file, use wiki_file_read.)",
   ]
     .filter(Boolean)
     .join("\n");

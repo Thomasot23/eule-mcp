@@ -107,6 +107,23 @@ describe("wiki tools", () => {
     expect(text).toContain("[...truncated at 10 chars");
   });
 
+  it("points to wiki_file_read when a page has no text of its own", async () => {
+    const filePage = connector("intranet", {
+      readPage: vi.fn(async () => ({
+        title: "Datei:Plan.pdf",
+        pageId: 2,
+        url: "u",
+        content: "",
+        format: "markdown" as const,
+        sections: [],
+        categories: [],
+        files: [],
+      })),
+    });
+    const text = await call(tools(serviceWith(filePage)), "wiki_read", { title: "Datei:Plan.pdf" });
+    expect(text).toContain("use wiki_file_read");
+  });
+
   it("hands out a continue token for the next page of a listing", async () => {
     const text = await call(tools(serviceWith(connector("intranet"))), "wiki_list", {
       recent: true,
